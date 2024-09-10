@@ -1,0 +1,3 @@
+[submodule "llvm-plugin/llvm-utils"]
+	path = llvm-plugin/llvm-utils
+	url = git@github.com:adriaanjacobs/llvm-utils.git
