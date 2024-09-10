@@ -1,0 +1,13 @@
+*
+!.gitignore
+!CMakeLists.txt
+!*.cpp
+!*.h
+!*.md
+
+!test/
+!test/*
+!test/**
+
+!llvm-plugin/
+!llvm-plugin/*
