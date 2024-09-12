@@ -5,9 +5,12 @@
 !*.h
 !*.md
 
-!test/
-!test/*
-!test/**
+!allocator/
+!allocator/*
 
 !llvm-plugin/
 !llvm-plugin/*
+
+!test/
+!test/*
+!test/**
