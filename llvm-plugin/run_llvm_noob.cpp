@@ -64,7 +64,6 @@ int main(int argc, char* argv[]) {
     // add passes in the order you want them to run
     llvm::ModulePassManager MPM;
     IsInBoundsAnalysis::addPassesAround<NOOBInstrumentationPass>(MPM);
-    MPM.addPass(NOOBInstrumentationPass{});
     // Just to be sure that none of the passes messed up the module.
     MPM.addPass(llvm::VerifierPass{});
 
