@@ -88,7 +88,7 @@ struct NOOBArena {
     {
         free_status.flip(); // set all to free
         auto aloc = (uintptr_t) suggested_location;
-        do {
+        while (true) { // round-robin try out all the possibilities
             // check if available
             auto possible_base = mmap64((void*) aloc, 3*single_arena_size(), PROT_NONE, MAP_ANON|MAP_PRIVATE|MAP_NORESERVE|MAP_FIXED_NOREPLACE, -1, 0);
             if (possible_base != MAP_FAILED)
@@ -97,7 +97,10 @@ struct NOOBArena {
 
             // increment & mask
             aloc = aloc + ((aloc - size_region_base(radix)) % size_region_size());
-        } while (aloc != (uintptr_t) suggested_location); // round-robin try out all the possibilities
+
+            // if we've gone all the way around, then we couldn't find any possible mapping
+            assert(aloc != (uintptr_t) suggested_location && "No more VM space available");
+        }
 
         // we've found one at aloc
         bottom_of_three_base = (void*) aloc;
