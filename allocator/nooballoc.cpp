@@ -48,6 +48,23 @@ inline size_t extract_lowestMSBs(uintptr_t ptr) {
     return (ptr >> radix) & (~0ULL >> (64 - TAG_WIDTH));
 }
 
+inline size_t extract_topbits(uintptr_t ptr) {
+    return ptr >> (64 - TAG_WIDTH);
+}
+
+inline size_t extract_offset(uintptr_t ptr) {
+    auto radix = extract_radix(ptr);
+    auto mask = (1ULL << radix) - 1;
+    return ptr & mask;
+}
+
+inline size_t extract_highestMSBs(uintptr_t ptr) {
+    auto radix = extract_radix(ptr);
+    ptr &= (~0ULL >> TAG_WIDTH); // clear the top bits
+    ptr >>= radix + TAG_WIDTH; // shift away the offset + lowestMSBs
+    return ptr;
+}
+
 struct NOOBArena {
     const size_t radix;
     void* base;
@@ -56,6 +73,14 @@ struct NOOBArena {
 
     size_t single_arena_size() const {
         return NUM_BLOCKS_IN_ARENA * block_size(radix);
+    }
+
+    bool is_full() const {
+        return free_status.none();
+    }
+
+    bool contains(void* ptr) {
+        return extract_highestMSBs((uintptr_t) ptr) == extract_highestMSBs((uintptr_t) base);
     }
 
     NOOBArena(size_t radix, void* suggested_location) :
@@ -99,8 +124,12 @@ struct NOOBArena {
         return (void*) ptr;
     }
 
-    bool is_full() const {
-        return free_status.none();
+    void free(void* ptr) {
+        auto lowestMSBs = extract_lowestMSBs((uintptr_t) ptr);
+        auto idx = lowestMSBs - extract_lowestMSBs((uintptr_t) base);
+        assert(idx < free_status.size());
+        assert(free_status[idx] == false && "Double free! This block is already free.");
+        free_status[idx] = true;
     }
 };
 
@@ -113,6 +142,7 @@ struct NOOBSizeAllocator {
     {}
 
     void* allocate() {
+        // FIXME: this suggested_base is never wrapping around
         void* suggested_base = (void*) size_region_base(radix);
         for (auto& arena : arenas) {
             suggested_base = (void*) ((uintptr_t) arena.bottom_of_three_base + 3*arena.single_arena_size());
@@ -126,6 +156,14 @@ struct NOOBSizeAllocator {
         auto ret = arena.allocate();
         assert(ret);
         return ret;
+    }
+
+    void free(void* ptr) {
+        for (auto& arena : arenas) {
+            if (arena.contains(ptr))
+                return arena.free(ptr);
+        }
+        assert(!"Double free? Allocator does not contain `ptr`");
     }
 };
 
@@ -145,16 +183,31 @@ struct NOOBAllocator {
         }
     }
 
+    NOOBSizeAllocator& getSizeAllocatorForRadix(size_t radix) {
+        size_t index = radix - min_radix;
+        return per_size_allocators.at(index);
+    }
+
     NOOBSizeAllocator& getSizeAllocatorFor(size_t allocation_size) {
         if (allocation_size < 16)
             allocation_size = 16;
-        size_t index = std::countr_zero(std::bit_ceil(allocation_size)) - min_radix;
-        assert(index < per_size_allocators.size());
-        return per_size_allocators.at(index);
+        return getSizeAllocatorForRadix(std::countr_zero(std::bit_ceil(allocation_size)));
     }
 
     void* allocate(size_t nbytes) {
         return getSizeAllocatorFor(nbytes).allocate();
+    }
+
+    void free(void* ptr) {
+        auto radix = extract_radix((uintptr_t) ptr);
+        // now for a quick security check
+        // check that it is still pointing to the original alloc
+        assert(extract_lowestMSBs((uintptr_t) ptr) == extract_topbits((uintptr_t) ptr));
+        // check that it is pointing to the base of the alloc
+        assert(extract_offset((uintptr_t) ptr) == 0);
+
+        // now delegate to the relevant size allocator to mark as free
+        getSizeAllocatorForRadix(radix).free(ptr);
     }
 };
 
@@ -169,4 +222,9 @@ void noob_init(size_t max_radix) {
 void* noob_allocate(size_t nbytes) {
     assert(noob_allocator.has_value());
     return noob_allocator->allocate(nbytes);
+}
+
+void noob_free(void* ptr) {
+    assert(noob_allocator.has_value());
+    noob_allocator->free(ptr);
 }
