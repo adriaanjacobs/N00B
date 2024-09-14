@@ -230,22 +230,37 @@ struct NOOBAllocator {
 
 std::optional<NOOBAllocator> noob_allocator = std::nullopt;
 
+extern "C" {
+
 void noob_init(size_t max_radix) {
     assert(!noob_allocator.has_value() && "NOOB is already initialized!");
     noob_allocator.emplace(max_radix);
 }
 
-void* noob_allocate(size_t nbytes) {
+void* noob_malloc(size_t nbytes) throw() {
+    fprintf(stderr, "noob_malloc(%lu)\n", nbytes);
     assert(noob_allocator.has_value());
     return noob_allocator->allocate(nbytes);
 }
 
-void noob_free(void* ptr) {
+void noob_free(void* ptr) throw() {
+    fprintf(stderr, "noob_free(%p)\n", ptr);
     assert(noob_allocator.has_value());
+    if (!ptr)
+        return;
     noob_allocator->free(ptr);
 }
 
-void* noob_realloc(void* oldptr, size_t newsize) {
+void* noob_realloc(void* oldptr, size_t newsize) throw() {
+    fprintf(stderr, "noob_realloc(%p, %lu)\n", oldptr, newsize);
     assert(noob_allocator.has_value());
+    if (!oldptr)
+        return noob_allocator->allocate(newsize);
+    if (!newsize) {
+        noob_allocator->free(oldptr);
+        return NULL;
+    }
     return noob_allocator->realloc(oldptr, newsize);
+}
+
 }
