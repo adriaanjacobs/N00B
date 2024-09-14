@@ -223,7 +223,7 @@ struct NOOBAllocator {
         if (oldsize >= newsize)
             return oldptr;
         free(oldptr);
-        return alloca(newsize);
+        return allocate(newsize);
     }
 };
 
