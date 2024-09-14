@@ -4,18 +4,14 @@
 
 #define TAG_WIDTH (8)
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+void noob_non_allocating_printf(const char* fmt, ...);
 
 void noob_init(size_t max_radix, bool* inside);
 
-void* noob_malloc(size_t nbytes) throw();
+void* noob_malloc(size_t nbytes);
 
-void noob_free(void* ptr) throw();
+void noob_free(void* ptr);
 
-void* noob_realloc(void* oldptr, size_t newsize) throw();
+void* noob_realloc(void* oldptr, size_t newsize);
 
-#ifdef __cplusplus
-}
-#endif
+void* noob_memalign(size_t alignment, size_t size);

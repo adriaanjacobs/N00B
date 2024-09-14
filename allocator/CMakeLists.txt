@@ -11,3 +11,7 @@ add_library(nooballoc SHARED nooballoc.cpp malloc_wrapper.cpp)
 target_compile_options(nooballoc PUBLIC ${COMMON_CXX_OPTIONS})
 
 add_executable(test_noob test.cpp)
+target_compile_options(test_noob PUBLIC
+    ${COMMON_CXX_OPTIONS}
+    -fno-builtin -fno-builtin-function
+)

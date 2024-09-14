@@ -1,6 +1,5 @@
 #include <assert.h>
-
-#include <bitset>
+#include <malloc.h>
 
 int main() {
 
@@ -25,4 +24,7 @@ int main() {
     assert(check4 != check3);
 
     // *some_bytes = 69;
+
+    auto aligned = memalign(32, 1000);
+    
 }

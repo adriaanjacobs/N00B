@@ -244,40 +244,40 @@ struct NOOBAllocator {
     }
 };
 
-void non_allocating_printf(const char* fmt, ...) {
+void noob_non_allocating_printf(const char* fmt, ...) {
+#if 0
     va_list vargs;
     va_start(vargs, fmt);
     char buf[0x1000];
     snprintf(buf, std::size(buf), fmt, vargs);
     write(STDERR_FILENO, buf, strlen(buf) + 1);
     va_end(vargs);
+#endif
 }
 
 std::optional<NOOBAllocator> noob_allocator = std::nullopt;
-
-extern "C" {
 
 void noob_init(size_t max_radix, bool* inside) {
     assert(!noob_allocator.has_value() && "NOOB is already initialized!");
     noob_allocator.emplace(max_radix, inside);
 }
 
-void* noob_malloc(size_t nbytes) throw() {
-    // non_allocating_printf("noob_malloc(%lu)\n", nbytes);
+void* noob_malloc(size_t nbytes) {
+    noob_non_allocating_printf("noob_malloc(%lu)\n", nbytes);
     assert(noob_allocator.has_value());
     return noob_allocator->allocate(nbytes);
 }
 
-void noob_free(void* ptr) throw() {
-    // non_allocating_printf("noob_free(%p)\n", ptr);
+void noob_free(void* ptr) {
+    noob_non_allocating_printf("noob_free(%p)\n", ptr);
     assert(noob_allocator.has_value());
     if (!ptr)
         return;
     noob_allocator->free(ptr);
 }
 
-void* noob_realloc(void* oldptr, size_t newsize) throw() {
-    // non_allocating_printf("noob_realloc(%p, %lu)\n", oldptr, newsize);
+void* noob_realloc(void* oldptr, size_t newsize) {
+    noob_non_allocating_printf("noob_realloc(%p, %lu)\n", oldptr, newsize);
     assert(noob_allocator.has_value());
     if (!oldptr)
         return noob_allocator->allocate(newsize);
@@ -288,4 +288,12 @@ void* noob_realloc(void* oldptr, size_t newsize) throw() {
     return noob_allocator->realloc(oldptr, newsize);
 }
 
+void* noob_memalign(size_t alignment, size_t size) {
+    noob_non_allocating_printf("noob_memalign(%lu, %lu)\n", alignment, size);
+    assert(noob_allocator.has_value());
+    if (!size)
+        return NULL;
+    assert(std::popcount(alignment) == 1); // pow2. might fail if 0
+    size = std::max(alignment, std::bit_ceil(size));
+    return noob_allocator->allocate(size);
 }

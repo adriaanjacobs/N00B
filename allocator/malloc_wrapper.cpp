@@ -1,5 +1,6 @@
 #include "nooballoc.h"
 
+#include <malloc.h>
 #include <stdlib.h>
 #include <assert.h>
 
@@ -53,6 +54,12 @@ decltype(realloc) __libc_realloc;
 void* realloc(void* oldptr, size_t newsize) {
     IF_NOT_INSIDE_NOOB(__libc_realloc(oldptr, newsize));
     return noob_realloc(oldptr, newsize);
+}
+
+decltype(memalign) __libc_memalign;
+void* memalign(size_t alignment, size_t size) {
+    IF_NOT_INSIDE_NOOB(__libc_memalign(alignment, size));
+    return noob_memalign(alignment, size);
 }
 
 }
