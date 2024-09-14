@@ -5,6 +5,7 @@
 #include <assert.h>
 
 #include <iterator>
+#include <bit>
 
 bool initialized = false;
 bool inside_noob = false;
@@ -56,10 +57,31 @@ void* realloc(void* oldptr, size_t newsize) {
     return noob_realloc(oldptr, newsize);
 }
 
+void* reallocarray (void *ptr, size_t nmemb, size_t size) {
+    return realloc(ptr, nmemb * size);
+}
+
 decltype(memalign) __libc_memalign;
 void* memalign(size_t alignment, size_t size) {
     IF_NOT_INSIDE_NOOB(__libc_memalign(alignment, size));
     return noob_memalign(alignment, size);
 }
+
+void* valloc (size_t size) {
+    return memalign(0x1000, size);
+}
+
+void* aligned_alloc (size_t alignment, size_t size) {
+    return memalign(alignment, size);
+}
+
+int posix_memalign (void **memptr, size_t alignment, size_t size) {
+    if (alignment % sizeof(void*) != 0 || std::popcount(alignment) != 1)
+        return EINVAL;
+    *memptr = memalign(alignment, size);
+    return 0;
+}
+
+// FIXME: support calloc
 
 }
