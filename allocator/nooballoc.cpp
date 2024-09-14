@@ -260,7 +260,6 @@ extern "C" {
 void noob_init(size_t max_radix, bool* inside) {
     assert(!noob_allocator.has_value() && "NOOB is already initialized!");
     noob_allocator.emplace(max_radix, inside);
-    *noob_allocator->inside = false;
 }
 
 void* noob_malloc(size_t nbytes) throw() {

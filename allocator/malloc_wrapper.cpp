@@ -8,11 +8,6 @@
 bool initialized = false;
 bool inside_noob = false;
 
-[[gnu::constructor(0)]]
-void init_noob() {
-    noob_init(42 - TAG_WIDTH - 1, &inside_noob);
-}
-
 struct set_inside_noob {
     const bool oldval;
 
@@ -27,6 +22,13 @@ struct set_inside_noob {
         inside_noob = oldval;
     }
 };
+
+[[gnu::constructor(0)]]
+void init_noob() {
+    set_inside_noob guard{};
+    noob_init(42 - TAG_WIDTH - 1, &inside_noob);
+    initialized = true;
+}
 
 #define IF_NOT_INSIDE_NOOB(expr)        \
     if (inside_noob || !initialized)    \
