@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-void noob_init(size_t max_radix);
+void noob_init(size_t max_radix, bool* inside);
 
 void* noob_malloc(size_t nbytes) throw();
 

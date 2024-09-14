@@ -6,22 +6,22 @@ int main() {
 
     fprintf(stderr, "Start of main!!\n");
 
-    malloc(6969);
-    void* test = malloc(6969);
-    volatile int* some_bytes = (int*) malloc(6969);
+    malloc(16);
+    void* test = malloc(16);
+    volatile int* some_bytes = (int*) malloc(16);
 
     free(test);
 
-    auto check = malloc(6969);
+    auto check = malloc(16);
     assert(check == test);
 
-    auto check2 = realloc(check, 3232);
+    auto check2 = realloc(check, 8);
     assert(check2 == check);
 
-    auto check3 = realloc(check, 6969);
+    auto check3 = realloc(check2, 16);
     assert(check3 == check2);
 
-    auto check4 = realloc(check, 1234);
+    auto check4 = realloc(check3, 1234);
     assert(check4 != check3);
 
     // *some_bytes = 69;

@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdarg.h>
+#include <unistd.h>
 
 #include <vector>
 #include <bit>
@@ -28,42 +30,47 @@
         }                                                                                       \
     } while (false)
 
-inline uintptr_t size_region_base(size_t radix) { 
+uintptr_t size_region_base(size_t radix) { 
     return radix << 42; 
 }
 
-inline size_t size_region_size() {
+size_t size_region_size() {
     return (1ULL << 42); 
 }
 
-inline size_t block_size(size_t radix) {
+size_t block_size(size_t radix) {
     return (1ULL << radix);
 }
 
-inline size_t extract_radix(uintptr_t ptr) {
+size_t extract_radix(uintptr_t ptr) {
     return (ptr >> 42) & 0b0011'1111;
 }
 
-inline size_t extract_lowestMSBs(uintptr_t ptr) {
+size_t extract_lowestMSBs(uintptr_t ptr) {
     auto radix = extract_radix(ptr);
     return (ptr >> radix) & (~0ULL >> (64 - TAG_WIDTH));
 }
 
-inline size_t extract_topbits(uintptr_t ptr) {
+size_t extract_topbits(uintptr_t ptr) {
     return ptr >> (64 - TAG_WIDTH);
 }
 
-inline size_t extract_offset(uintptr_t ptr) {
+size_t extract_offset(uintptr_t ptr) {
     auto radix = extract_radix(ptr);
     auto mask = (1ULL << radix) - 1;
     return ptr & mask;
 }
 
-inline size_t extract_highestMSBs(uintptr_t ptr) {
+size_t extract_highestMSBs(uintptr_t ptr) {
     auto radix = extract_radix(ptr);
     ptr &= (~0ULL >> TAG_WIDTH); // clear the top bits
     ptr >>= radix + TAG_WIDTH; // shift away the offset + lowestMSBs
     return ptr;
+}
+
+template<typename T>
+T* noob_striptop(T* ptr) {
+    return (T*) ((uintptr_t) ptr & (~0ULL >> TAG_WIDTH)); 
 }
 
 struct NOOBArena {
@@ -180,16 +187,23 @@ struct NOOBAllocator {
     // determines maximum allocation size
     const size_t max_radix;
     const size_t min_radix = 4;
+    bool* const inside;
 
     std::vector<NOOBSizeAllocator> per_size_allocators;
 
-    NOOBAllocator(size_t max_radix) :
-        max_radix{max_radix}
+    NOOBAllocator(size_t max_radix, bool* inside) :
+        max_radix{max_radix},
+        inside{inside}
     {
+        *inside = true;
         assert(max_radix > min_radix && max_radix < (42 - TAG_WIDTH));
         for (uint radix = min_radix; radix <= max_radix; radix++) {
             per_size_allocators.push_back(NOOBSizeAllocator{radix});
         }
+    }
+
+    ~NOOBAllocator() {
+        *inside = true;
     }
 
     NOOBSizeAllocator& getSizeAllocatorForRadix(size_t radix) {
@@ -224,29 +238,39 @@ struct NOOBAllocator {
         if (oldsize >= newsize)
             return oldptr;
         auto newptr = allocate(newsize);
-        memcpy(newptr, oldptr, oldsize);
+        memcpy(noob_striptop(newptr), noob_striptop(oldptr), oldsize);
         free(oldptr);
         return newptr;
     }
 };
 
+void non_allocating_printf(const char* fmt, ...) {
+    va_list vargs;
+    va_start(vargs, fmt);
+    char buf[0x1000];
+    snprintf(buf, std::size(buf), fmt, vargs);
+    write(STDERR_FILENO, buf, strlen(buf) + 1);
+    va_end(vargs);
+}
+
 std::optional<NOOBAllocator> noob_allocator = std::nullopt;
 
 extern "C" {
 
-void noob_init(size_t max_radix) {
+void noob_init(size_t max_radix, bool* inside) {
     assert(!noob_allocator.has_value() && "NOOB is already initialized!");
-    noob_allocator.emplace(max_radix);
+    noob_allocator.emplace(max_radix, inside);
+    *noob_allocator->inside = false;
 }
 
 void* noob_malloc(size_t nbytes) throw() {
-    fprintf(stderr, "noob_malloc(%lu)\n", nbytes);
+    // non_allocating_printf("noob_malloc(%lu)\n", nbytes);
     assert(noob_allocator.has_value());
     return noob_allocator->allocate(nbytes);
 }
 
 void noob_free(void* ptr) throw() {
-    fprintf(stderr, "noob_free(%p)\n", ptr);
+    // non_allocating_printf("noob_free(%p)\n", ptr);
     assert(noob_allocator.has_value());
     if (!ptr)
         return;
@@ -254,7 +278,7 @@ void noob_free(void* ptr) throw() {
 }
 
 void* noob_realloc(void* oldptr, size_t newsize) throw() {
-    fprintf(stderr, "noob_realloc(%p, %lu)\n", oldptr, newsize);
+    // non_allocating_printf("noob_realloc(%p, %lu)\n", oldptr, newsize);
     assert(noob_allocator.has_value());
     if (!oldptr)
         return noob_allocator->allocate(newsize);
