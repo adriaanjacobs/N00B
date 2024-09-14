@@ -217,6 +217,14 @@ struct NOOBAllocator {
         // now delegate to the relevant size allocator to mark as free
         getSizeAllocatorForRadix(radix).free(ptr);
     }
+
+    void* realloc(void* oldptr, size_t newsize) {
+        auto oldsize = 1ULL << extract_radix((uintptr_t) oldptr);
+        if (oldsize >= newsize)
+            return oldptr;
+        free(oldptr);
+        return alloca(newsize);
+    }
 };
 
 
@@ -235,4 +243,9 @@ void* noob_allocate(size_t nbytes) {
 void noob_free(void* ptr) {
     assert(noob_allocator.has_value());
     noob_allocator->free(ptr);
+}
+
+void* noob_realloc(void* oldptr, size_t newsize) {
+    assert(noob_allocator.has_value());
+    return noob_allocator->realloc(oldptr, newsize);
 }

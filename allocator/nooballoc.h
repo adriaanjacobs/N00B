@@ -9,3 +9,5 @@ void noob_init(size_t max_radix);
 void* noob_allocate(size_t nbytes);
 
 void noob_free(void* ptr);
+
+void* noob_realloc(void* oldptr, size_t newsize);
