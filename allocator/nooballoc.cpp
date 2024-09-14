@@ -141,7 +141,7 @@ struct NOOBSizeAllocator {
         radix{radix}
     {}
 
-    void* allocate() {
+    NOOBArena& get_or_create_arena() {
         // FIXME: this suggested_base is never wrapping around
         void* suggested_base = (void*) size_region_base(radix);
         for (auto& arena : arenas) {
@@ -149,10 +149,14 @@ struct NOOBSizeAllocator {
             if (arena.is_full())
                 continue;
             
-            return arena.allocate();
+            return arena;
         }
 
-        auto& arena = arenas.emplace_back(radix, suggested_base);
+        return arenas.emplace_back(radix, suggested_base);
+    }
+
+    void* allocate() {
+        auto& arena = get_or_create_arena();
         auto ret = arena.allocate();
         assert(ret);
         return ret;
