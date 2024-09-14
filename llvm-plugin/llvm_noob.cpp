@@ -1,11 +1,11 @@
 #include "llvm_noob.h"
 
+#include <NOOB/config.h>
+
 #include <llvm-utils/util.h>
 #include <llvm-utils/safetyanalysis/safetyanalysis.h>
 
 #include <llvm/IR/Instructions.h>
-
-constexpr uint64_t TAG_WIDTH = 8;
 
 llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm::ModuleAnalysisManager& MAM) {
     auto& unsafeAccessInfo = MAM.getResult<UnsafeAccessFinderAnalysis>(module).getOrCreate(false);

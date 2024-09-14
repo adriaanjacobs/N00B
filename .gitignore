@@ -8,6 +8,10 @@
 !allocator/
 !allocator/*
 
+!include/
+!include/*
+!include/**
+
 !llvm-plugin/
 !llvm-plugin/*
 

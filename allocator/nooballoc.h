@@ -1,8 +1,8 @@
 #pragma once
 
-#include <stddef.h>
+#include <NOOB/config.h>
 
-#define TAG_WIDTH (8)
+#include <stddef.h>
 
 void noob_non_allocating_printf(const char* fmt, ...);
 
