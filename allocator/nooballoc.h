@@ -15,3 +15,5 @@ void noob_free(void* ptr);
 void* noob_realloc(void* oldptr, size_t newsize);
 
 void* noob_memalign(size_t alignment, size_t size);
+
+void* noob_calloc(size_t nbytes);

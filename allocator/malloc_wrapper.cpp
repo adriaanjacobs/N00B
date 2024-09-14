@@ -82,6 +82,10 @@ int posix_memalign (void **memptr, size_t alignment, size_t size) {
     return 0;
 }
 
-// FIXME: support calloc
+decltype(calloc) __libc_calloc;
+void* calloc(size_t nmemb, size_t size) {
+    IF_NOT_INSIDE_NOOB(__libc_calloc(nmemb, size));
+    return noob_calloc(nmemb * size);
+}
 
 }

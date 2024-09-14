@@ -78,6 +78,7 @@ struct NOOBArena {
     void* base;
     void* bottom_of_three_base;
     std::bitset<NUM_BLOCKS_IN_ARENA> free_status;
+    std::bitset<NUM_BLOCKS_IN_ARENA> fresh_status;
 
     size_t single_arena_size() const {
         return NUM_BLOCKS_IN_ARENA * block_size(radix);
@@ -85,6 +86,10 @@ struct NOOBArena {
 
     bool is_full() const {
         return free_status.none();
+    }
+
+    bool has_fresh_blocks() const {
+        return fresh_status.any();
     }
 
     bool contains(void* ptr) {
@@ -95,6 +100,7 @@ struct NOOBArena {
         radix{radix}
     {
         free_status.flip(); // set all to free
+        fresh_status.flip(); // at first, all blocks are fresh
         auto aloc = (uintptr_t) suggested_location;
         while (true) { // round-robin try out all the possibilities
             // check if available
@@ -117,13 +123,10 @@ struct NOOBArena {
         ASSERT_ELSE_PERROR(mprotect(base, single_arena_size(), PROT_READ|PROT_WRITE) == 0);
     }
 
-    void* allocate() {
-        auto idx = free_status._Find_first();
-        if (idx == free_status.size())
-            return nullptr;
-
+    void* allocate(uint idx) {
         // use this one
         free_status[idx] = false;
+        fresh_status[idx] = false;
 
         // calculate the address of the block at this idx
         auto ptr = ((uintptr_t) base) + idx * block_size(radix);
@@ -135,12 +138,26 @@ struct NOOBArena {
         return (void*) ptr;
     }
 
+    void* allocate() {
+        auto idx = free_status._Find_first();
+        if (idx == free_status.size())
+            return nullptr;
+        return allocate(idx);
+    }
+
     void free(void* ptr) {
         auto lowestMSBs = extract_lowestMSBs((uintptr_t) ptr);
         auto idx = lowestMSBs - extract_lowestMSBs((uintptr_t) base);
         assert(idx < free_status.size());
         assert(free_status[idx] == false && "Double free! This block is already free.");
         free_status[idx] = true;
+    }
+
+    void* zalloc() {
+        auto idx = fresh_status._Find_first();
+        if (idx == fresh_status.size())
+            return nullptr;
+        return allocate(idx);
     }
 };
 
@@ -152,19 +169,25 @@ struct NOOBSizeAllocator {
         radix{radix}
     {}
 
-    NOOBArena& get_or_create_arena() {
+    void* figure_out_a_good_base_suggestion() {
         void* suggested_base = (void*) size_region_base(radix);
-        for (auto& arena : arenas) {
+        for (auto& arena : arenas) 
             suggested_base = (void*) ((uintptr_t) arena.bottom_of_three_base + 3*arena.single_arena_size());
+
+        if (extract_radix((uintptr_t) suggested_base) != radix)
+            suggested_base = (void*) size_region_base(radix);
+        return suggested_base;
+    }
+
+    NOOBArena& get_or_create_arena() {
+        for (auto& arena : arenas) {
             if (arena.is_full())
                 continue;
             
             return arena;
         }
 
-        if (extract_radix((uintptr_t) suggested_base) != radix)
-            suggested_base = (void*) size_region_base(radix);
-        return arenas.emplace_back(radix, suggested_base);
+        return arenas.emplace_back(radix, figure_out_a_good_base_suggestion());
     }
 
     void* allocate() {
@@ -180,6 +203,25 @@ struct NOOBSizeAllocator {
                 return arena.free(ptr);
         }
         assert(!"Double free? Allocator does not contain `ptr`");
+    }
+
+    void* zalloc() {
+        NOOBArena* arena_with_free_space = nullptr;
+        for (auto& arena : arenas) {
+            if (!arena.is_full())
+                arena_with_free_space = &arena;
+            if (arena.has_fresh_blocks())
+                return arena.zalloc();
+        }
+
+        // no arenas with fresh blocks, memzero some existing block
+        if (arena_with_free_space) {
+            auto block = arena_with_free_space->allocate();
+            memset(noob_striptop(block), 0, block_size(radix));
+        }
+
+        // not even an arena with free blocks at all, find a new one
+        return arenas.emplace_back(radix, figure_out_a_good_base_suggestion()).allocate();
     }
 };
 
@@ -242,6 +284,10 @@ struct NOOBAllocator {
         free(oldptr);
         return newptr;
     }
+
+    void* zalloc(size_t nbytes) {
+        return getSizeAllocatorFor(nbytes).zalloc();
+    }
 };
 
 void noob_non_allocating_printf(const char* fmt, ...) {
@@ -296,4 +342,10 @@ void* noob_memalign(size_t alignment, size_t size) {
     assert(std::popcount(alignment) == 1); // pow2. might fail if 0
     size = std::max(alignment, std::bit_ceil(size));
     return noob_allocator->allocate(size);
+}
+
+void* noob_calloc(size_t nbytes) {
+    noob_non_allocating_printf("noob_calloc(%lu)\n", nbytes);
+    assert(noob_allocator.has_value());
+    return noob_allocator->zalloc(nbytes);
 }
