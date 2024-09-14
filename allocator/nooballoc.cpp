@@ -6,6 +6,7 @@
 #include <sys/mman.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <vector>
 #include <bit>
@@ -222,11 +223,12 @@ struct NOOBAllocator {
         auto oldsize = 1ULL << extract_radix((uintptr_t) oldptr);
         if (oldsize >= newsize)
             return oldptr;
+        auto newptr = allocate(newsize);
+        memcpy(newptr, oldptr, oldsize);
         free(oldptr);
-        return allocate(newsize);
+        return newptr;
     }
 };
-
 
 std::optional<NOOBAllocator> noob_allocator = std::nullopt;
 
