@@ -7,35 +7,33 @@
 #include <iterator>
 #include <bit>
 
-bool initialized = false;
-bool inside_noob = false;
+bool hooked = false;
 
-struct set_inside_noob {
+struct unhook_scope {
     const bool oldval;
 
-    set_inside_noob () :
-        oldval{inside_noob}
+    unhook_scope () :
+        oldval{hooked}
     {
-        inside_noob = true;
+        hooked = false;
     }
 
-    ~set_inside_noob () {
-        assert(inside_noob);
-        inside_noob = oldval;
+    ~unhook_scope () {
+        assert(!hooked);
+        hooked = oldval;
     }
 };
 
 [[gnu::constructor(0)]]
 void init_noob() {
-    set_inside_noob guard{};
-    noob_init(42 - TAG_WIDTH - 1, &inside_noob);
-    initialized = true;
+    noob_init(42 - TAG_WIDTH - 1, &hooked);
+    hooked = true;
 }
 
-#define IF_INSIDE_NOOB(expr)        \
-    if (inside_noob || !initialized)    \
-        return expr;                    \
-    set_inside_noob guard{};
+#define IF_INSIDE_NOOB(expr)    \
+    if (!hooked)                \
+        return expr;            \
+    unhook_scope guard{};
 
 extern "C" {
 

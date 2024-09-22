@@ -229,15 +229,14 @@ struct NOOBAllocator {
     // determines maximum allocation size
     const size_t max_radix;
     const size_t min_radix = 4;
-    bool* const inside;
+    bool* const hooked;
 
     std::vector<NOOBSizeAllocator> per_size_allocators;
 
-    NOOBAllocator(size_t max_radix, bool* inside) :
+    NOOBAllocator(size_t max_radix, bool* hooked) :
         max_radix{max_radix},
-        inside{inside}
+        hooked{hooked}
     {
-        *inside = true;
         assert(max_radix > min_radix && max_radix < (42 - TAG_WIDTH));
         for (uint radix = min_radix; radix <= max_radix; radix++) {
             per_size_allocators.push_back(NOOBSizeAllocator{radix});
@@ -245,7 +244,8 @@ struct NOOBAllocator {
     }
 
     ~NOOBAllocator() {
-        *inside = true;
+        // ensure that our deallocation will not trigger a bunch of recursive `free` invocations
+        *hooked = false;
     }
 
     NOOBSizeAllocator& getSizeAllocatorForRadix(size_t radix) {
@@ -303,9 +303,9 @@ void noob_non_allocating_printf(const char* fmt, ...) {
 
 std::optional<NOOBAllocator> noob_allocator = std::nullopt;
 
-void noob_init(size_t max_radix, bool* inside) {
+void noob_init(size_t max_radix, bool* hooked) {
     assert(!noob_allocator.has_value() && "NOOB is already initialized!");
-    noob_allocator.emplace(max_radix, inside);
+    noob_allocator.emplace(max_radix, hooked);
 }
 
 void* noob_malloc(size_t nbytes) {
