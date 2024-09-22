@@ -33,7 +33,7 @@ void init_noob() {
     hooked = true;
 }
 
-#define IF_INSIDE_NOOB(expr)    \
+#define IF_NOT_HOOKED(expr)    \
     if (!hooked)                \
         return expr;            \
     unhook_scope guard{};
@@ -67,19 +67,19 @@ extern "C" {
 
 decltype(malloc) __libc_malloc;
 void* malloc(size_t nbytes) {
-    IF_INSIDE_NOOB(__libc_malloc(nbytes));
+    IF_NOT_HOOKED(__libc_malloc(nbytes));
     return LOGGED_CALL(noob_malloc, nbytes);
 }
 
 decltype(free) __libc_free;
 void free(void* ptr) {
-    IF_INSIDE_NOOB(__libc_free(ptr));
+    IF_NOT_HOOKED(__libc_free(ptr));
     return LOGGED_CALL(noob_free, ptr);
 }
 
 decltype(realloc) __libc_realloc;
 void* realloc(void* oldptr, size_t newsize) {
-    IF_INSIDE_NOOB(__libc_realloc(oldptr, newsize));
+    IF_NOT_HOOKED(__libc_realloc(oldptr, newsize));
     return LOGGED_CALL(noob_realloc, oldptr, newsize);
 }
 
@@ -89,7 +89,7 @@ void* reallocarray (void *ptr, size_t nmemb, size_t size) {
 
 decltype(memalign) __libc_memalign;
 void* memalign(size_t alignment, size_t size) {
-    IF_INSIDE_NOOB(__libc_memalign(alignment, size));
+    IF_NOT_HOOKED(__libc_memalign(alignment, size));
     return LOGGED_CALL(noob_memalign, alignment, size);
 }
 
@@ -110,7 +110,7 @@ int posix_memalign (void **memptr, size_t alignment, size_t size) {
 
 decltype(calloc) __libc_calloc;
 void* calloc(size_t nmemb, size_t size) {
-    IF_INSIDE_NOOB(__libc_calloc(nmemb, size));
+    IF_NOT_HOOKED(__libc_calloc(nmemb, size));
     return LOGGED_CALL(noob_calloc, nmemb * size);
 }
 
