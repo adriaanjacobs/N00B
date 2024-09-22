@@ -337,3 +337,8 @@ void* noob_calloc(size_t nbytes) {
     assert(noob_allocator.has_value());
     return noob_allocator->zalloc(nbytes);
 }
+
+size_t noob_usable_size(void* ptr) {
+    auto radix = extract_radix((uintptr_t) ptr);
+    return 1ULL << radix;
+}

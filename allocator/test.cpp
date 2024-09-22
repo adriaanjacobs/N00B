@@ -22,8 +22,10 @@ int main() {
 
     auto check4 = realloc(check3, 1234);
     assert(check4 != check3);
+    assert(malloc_usable_size(check4) == 2048);
 
-    // *some_bytes = 69;
+    printf("somebytes: %p\n", some_bytes);
+    *some_bytes = 69;
 
     auto aligned = memalign(32, 1000);
 

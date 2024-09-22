@@ -114,4 +114,10 @@ void* calloc(size_t nmemb, size_t size) {
     return LOGGED_CALL(noob_calloc, nmemb * size);
 }
 
+decltype(malloc_usable_size) __libc_malloc_usable_size;
+size_t malloc_usable_size(void* ptr) {
+    IF_NOT_HOOKED(__libc_malloc_usable_size(ptr));
+    return LOGGED_CALL(noob_usable_size, ptr);
+}
+
 }
