@@ -15,6 +15,8 @@
 #include <optional>
 #include <bitset>
 
+#define TAG_POINTERS 1
+
 #define NUM_BLOCKS_IN_ARENA (1ULL << TAG_WIDTH)
 
 #define ASSERT_ELSE_PERROR(cond) \
@@ -132,9 +134,11 @@ struct NOOBArena {
         auto ptr = ((uintptr_t) base) + idx * block_size(radix);
         assert(extract_radix(ptr) == radix);
         
+#if TAG_POINTERS
         // embed the lowestMSBs in the top bits now
         auto mask = extract_lowestMSBs(ptr) << (64 - TAG_WIDTH);
         ptr ^= mask;
+#endif
         return (void*) ptr;
     }
 
@@ -263,9 +267,11 @@ struct NOOBAllocator {
 
     void free(void* ptr) {
         auto radix = extract_radix((uintptr_t) ptr);
+#if TAG_POINTERS
         // now for a quick security check
         // check that it is still pointing to the original alloc
         assert(extract_lowestMSBs((uintptr_t) ptr) == extract_topbits((uintptr_t) ptr));
+#endif
         // check that it is pointing to the base of the alloc
         assert(extract_offset((uintptr_t) ptr) == 0);
 
