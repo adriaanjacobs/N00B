@@ -140,8 +140,7 @@ struct NOOBArena {
 
     void* allocate() {
         auto idx = free_status._Find_first();
-        if (idx == free_status.size())
-            return nullptr;
+        assert(idx < free_status.size());
         return allocate(idx);
     }
 
@@ -155,8 +154,7 @@ struct NOOBArena {
 
     void* zalloc() {
         auto idx = fresh_status._Find_first();
-        if (idx == fresh_status.size())
-            return nullptr;
+        assert(idx < fresh_status.size());
         return allocate(idx);
     }
 };
