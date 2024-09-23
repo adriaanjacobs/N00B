@@ -1,6 +1,7 @@
 #include "nooballoc.h"
 
 #include <errno.h>
+#include <linux/prctl.h>
 #include <stddef.h>
 #include <assert.h>
 #include <sys/mman.h>
@@ -9,6 +10,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <unistd.h>
+#include <sys/prctl.h>
 
 #include <vector>
 #include <bit>
@@ -239,6 +241,11 @@ struct NOOBAllocator {
         max_radix{max_radix},
         hooked{hooked}
     {
+#if TAG_POINTERS
+        // start by enabling the tagged address ABI
+        if (prctl(PR_SET_TAGGED_ADDR_CTRL, PR_TAGGED_ADDR_ENABLE, 0, 0, 0, 0) == -1)
+            perror("enable tagged address kernel abi");
+#endif
         assert(max_radix > min_radix && max_radix < (42 - TAG_WIDTH));
         for (uint radix = min_radix; radix <= max_radix; radix++) {
             per_size_allocators.push_back(NOOBSizeAllocator{radix});
