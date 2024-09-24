@@ -16,6 +16,7 @@
 #include <bit>
 #include <optional>
 #include <bitset>
+#include <map>
 
 #define TAG_POINTERS 1
 
@@ -34,19 +35,23 @@
         }                                                                                       \
     } while (false)
 
-uintptr_t size_region_base(size_t radix) { 
-    return radix << 42; 
+uintptr_t size_region_base(uint8_t radix) { 
+    return ((size_t) radix) << 42; 
 }
 
 size_t size_region_size() {
     return (1ULL << 42); 
 }
 
-size_t block_size(size_t radix) {
+size_t block_size(uint8_t radix) {
     return (1ULL << radix);
 }
 
-size_t extract_radix(uintptr_t ptr) {
+size_t single_arena_size(uint8_t radix) {
+    return NUM_BLOCKS_IN_ARENA * block_size(radix);
+}
+
+uint8_t extract_radix(uintptr_t ptr) {
     return (ptr >> 42) & 0b0011'1111;
 }
 
@@ -77,16 +82,23 @@ T* noob_striptop(T* ptr) {
     return (T*) ((uintptr_t) ptr & (~0ULL >> TAG_WIDTH)); 
 }
 
+size_t arena_idx_in_size_region(uintptr_t ptr, uint8_t radix) {
+    return (ptr - size_region_base(radix)) / single_arena_size(radix);
+}
+
+size_t arena_idx_in_size_region(uintptr_t ptr) {
+    auto radix = extract_radix(ptr);
+    return arena_idx_in_size_region(ptr, radix);
+}
+
 struct NOOBArena {
-    const size_t radix;
+    std::bitset<NUM_BLOCKS_IN_ARENA> free_status;
+    // fresh blocks have never been allocated before
+    //  they are, by definition, free
+    std::bitset<NUM_BLOCKS_IN_ARENA> fresh_status;
     void* base;
     void* bottom_of_three_base;
-    std::bitset<NUM_BLOCKS_IN_ARENA> free_status;
-    std::bitset<NUM_BLOCKS_IN_ARENA> fresh_status;
-
-    size_t single_arena_size() const {
-        return NUM_BLOCKS_IN_ARENA * block_size(radix);
-    }
+    const uint8_t radix;
 
     bool is_full() const {
         return free_status.none();
@@ -100,7 +112,11 @@ struct NOOBArena {
         return extract_highestMSBs((uintptr_t) ptr) == extract_highestMSBs((uintptr_t) base);
     }
 
-    NOOBArena(size_t radix, void* suggested_location) :
+    size_t idx_in_containing_size_region() const {
+        return arena_idx_in_size_region((uintptr_t) base, radix);
+    }
+
+    NOOBArena(uint8_t radix, void* suggested_location) :
         radix{radix}
     {
         free_status.flip(); // set all to free
@@ -108,7 +124,7 @@ struct NOOBArena {
         auto aloc = (uintptr_t) suggested_location;
         while (true) { // round-robin try out all the possibilities
             // check if available
-            auto possible_base = mmap64((void*) aloc, 3*single_arena_size(), PROT_NONE, MAP_ANON|MAP_PRIVATE|MAP_NORESERVE|MAP_FIXED_NOREPLACE, -1, 0);
+            auto possible_base = mmap64((void*) aloc, 3*single_arena_size(radix), PROT_NONE, MAP_ANON|MAP_PRIVATE|MAP_NORESERVE|MAP_FIXED_NOREPLACE, -1, 0);
             if (possible_base != MAP_FAILED)
                 break;
             ASSERT_ELSE_PERROR(errno == EEXIST);
@@ -122,9 +138,12 @@ struct NOOBArena {
 
         // we've found one at aloc
         bottom_of_three_base = (void*) aloc;
-        base = (void*) (aloc + single_arena_size());
+        base = (void*) (aloc + single_arena_size(radix));
         // get rw access to the actual arena in the middle
-        ASSERT_ELSE_PERROR(mprotect(base, single_arena_size(), PROT_READ|PROT_WRITE) == 0);
+        ASSERT_ELSE_PERROR(mprotect(base, single_arena_size(radix), PROT_READ|PROT_WRITE) == 0);
+
+        // we require this alignment so we can quickly figure out which arena a given pointer belongs to
+        assert((uintptr_t) base % single_arena_size(radix) == 0);
     }
 
     void* allocate(uint idx) {
@@ -166,80 +185,97 @@ struct NOOBArena {
 };
 
 struct NOOBSizeAllocator {
-    const size_t radix;
-    std::vector<NOOBArena> arenas;
+    // quick lookup during `free`
+    std::map<uintptr_t, NOOBArena> arenas;
+    // if there are any free arenas, they will be in the back here
+    //  requires `arenas` iterators to be stable
+    std::vector<decltype(arenas)::iterator> arenas_with_free_entries;
+    const uint8_t radix;
 
-    NOOBSizeAllocator(size_t radix) : 
+    NOOBSizeAllocator(uint8_t radix) : 
         radix{radix}
     {}
 
     void* figure_out_a_good_base_suggestion() {
         void* suggested_base = (void*) size_region_base(radix);
-        for (auto& arena : arenas) 
-            suggested_base = (void*) ((uintptr_t) arena.bottom_of_three_base + 3*arena.single_arena_size());
+        for (auto& [_, arena] : arenas) 
+            suggested_base = (void*) ((uintptr_t) arena.bottom_of_three_base + 3*single_arena_size(radix));
 
         if (extract_radix((uintptr_t) suggested_base) != radix)
             suggested_base = (void*) size_region_base(radix);
         return suggested_base;
     }
 
-    NOOBArena& get_or_create_arena() {
-        for (auto& arena : arenas) {
-            if (arena.is_full())
-                continue;
-            
-            return arena;
+    // returns {it: arena_it, bool: arena_definitely_has_fresh_blocks}
+    std::pair<decltype(arenas)::iterator, bool> get_or_create_arena(bool prefer_fresh) {
+        if (prefer_fresh) {
+            // first check whether we can find any fresh blocks that we dont have to zero
+            for (auto arena_it : arenas_with_free_entries) {
+                if (arena_it->second.has_fresh_blocks())
+                    return {arena_it, true};
+            }
         }
 
-        return arenas.emplace_back(radix, figure_out_a_good_base_suggestion());
+        // if we cannot find fresh blocks, or we dont care about freshness, just find a free block
+        // if there are any free arenas, they'll be in the back of `arenas_with_free_entries`
+        if (!arenas_with_free_entries.empty() && !arenas_with_free_entries.back()->second.is_full())
+            return {arenas_with_free_entries.back(), false};
+
+        // there are no free entries in any of the arenas, create a new one
+        NOOBArena arena{radix, figure_out_a_good_base_suggestion()};
+        // i have to explicitly compute this upfront since there is no standard function argument evaluation order
+        auto arena_idx = arena.idx_in_containing_size_region(); 
+        auto [it, inserted] = arenas.try_emplace(arena_idx, std::move(arena));
+        assert(inserted);
+        arenas_with_free_entries.push_back(it);
+        return {it, true};
     }
 
     void* allocate() {
-        auto& arena = get_or_create_arena();
-        auto ret = arena.allocate();
+        auto arena_it = get_or_create_arena(false).first;
+        auto ret = arena_it->second.allocate();
         assert(ret);
+        // if we just filled this arena, make sure it is removed from the free arenas
+        if (arena_it->second.is_full()) {
+            assert(arena_it == arenas_with_free_entries.back());
+            arenas_with_free_entries.pop_back();
+        }
         return ret;
     }
 
     void free(void* ptr) {
-        for (auto& arena : arenas) {
-            if (arena.contains(ptr))
-                return arena.free(ptr);
-        }
-        assert(!"Double free? Allocator does not contain `ptr`");
+        auto arena_idx = arena_idx_in_size_region((uintptr_t) noob_striptop(ptr));
+        auto arena_it = arenas.find(arena_idx);
+        assert(arena_it != arenas.end() && "Cannot find block to free in any arena??");
+        bool was_full = arena_it->second.is_full();
+        arena_it->second.free(ptr);
+        // if the arena was full, reintroduce it to the list of free arenas
+        if (was_full) 
+            arenas_with_free_entries.push_back(arena_it);
     }
 
     void* zalloc() {
-        NOOBArena* arena_with_free_space = nullptr;
-        for (auto& arena : arenas) {
-            if (!arena.is_full())
-                arena_with_free_space = &arena;
-            if (arena.has_fresh_blocks())
-                return arena.zalloc();
-        }
-
-        // no arenas with fresh blocks, memzero some existing block
-        if (arena_with_free_space) {
-            auto block = arena_with_free_space->allocate();
-            memset(noob_striptop(block), 0, block_size(radix));
-        }
-
-        // not even an arena with free blocks at all, find a new one
-        return arenas.emplace_back(radix, figure_out_a_good_base_suggestion()).allocate();
+        auto [arena_it, is_definitely_fresh] = get_or_create_arena(true);
+        if (is_definitely_fresh) // we either found fresh blocks in this arena or we just created it
+            return arena_it->second.zalloc();
+        
+        // we found some non-fresh blocks that we still have to zero
+        auto block = arena_it->second.allocate();
+        memset(noob_striptop(block), 0, block_size(radix));
+        return block;
     }
 };
 
 struct NOOBAllocator {
-    // determines maximum allocation size
-    const size_t max_radix;
-    const size_t min_radix = 4;
-    bool* const hooked;
-
     std::vector<NOOBSizeAllocator> per_size_allocators;
+    bool* const hooked;
+    // determines maximum allocation size
+    const uint8_t max_radix;
+    const uint8_t min_radix = 4;
 
-    NOOBAllocator(size_t max_radix, bool* hooked) :
-        max_radix{max_radix},
-        hooked{hooked}
+    NOOBAllocator(uint8_t max_radix, bool* hooked) :
+        hooked{hooked},
+        max_radix{max_radix}
     {
 #if TAG_POINTERS
         // start by enabling the tagged address ABI
@@ -247,7 +283,7 @@ struct NOOBAllocator {
             perror("enable tagged address kernel abi");
 #endif
         assert(max_radix > min_radix && max_radix < (42 - TAG_WIDTH));
-        for (uint radix = min_radix; radix <= max_radix; radix++) {
+        for (uint8_t radix = min_radix; radix <= max_radix; radix++) {
             per_size_allocators.push_back(NOOBSizeAllocator{radix});
         }
     }
@@ -257,7 +293,7 @@ struct NOOBAllocator {
         *hooked = false;
     }
 
-    NOOBSizeAllocator& getSizeAllocatorForRadix(size_t radix) {
+    NOOBSizeAllocator& getSizeAllocatorForRadix(uint8_t radix) {
         size_t index = radix - min_radix;
         return per_size_allocators.at(index);
     }
