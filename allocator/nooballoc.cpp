@@ -212,7 +212,8 @@ struct NOOBSizeAllocator {
     std::pair<decltype(arenas)::iterator, bool> get_or_create_arena(bool prefer_fresh) {
         if (prefer_fresh) {
             // first check whether we can find any fresh blocks that we dont have to zero
-            for (auto arena_it : arenas_with_free_entries) {
+            for (auto it = arenas_with_free_entries.rbegin(); it != arenas_with_free_entries.rend(); it++) {
+                auto arena_it = *it;
                 if (arena_it->second.has_fresh_blocks())
                     return {arena_it, true};
             }
