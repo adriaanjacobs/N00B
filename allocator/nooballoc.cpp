@@ -19,6 +19,7 @@
 #include <optional>
 #include <bitset>
 #include <map>
+#include <functional>
 
 #define TAG_POINTERS 0
 
@@ -36,6 +37,17 @@
             abort();                                                                            \
         }                                                                                       \
     } while (false)
+
+struct run_on_destruct {
+    std::function<void()> func;
+    run_on_destruct(auto func) : func{std::move(func)} {}
+    ~run_on_destruct() { func(); }
+};
+
+#define CONCAT_(x,y) x##y
+#define CONCAT(x,y) CONCAT_(x,y)
+#define UNIQUE_VAR_NAME CONCAT(_unique_var_, __COUNTER__)
+#define defer(block) run_on_destruct UNIQUE_VAR_NAME{[&] () -> void { block; }}
 
 uintptr_t size_region_base(uint8_t radix) { 
     return ((size_t) radix) << 42; 
@@ -258,7 +270,15 @@ struct NOOBSizeAllocator {
     }
 
     void* zalloc() {
-        auto [arena_it, is_definitely_fresh] = get_or_create_arena(true);
+        auto [_arena_it, is_definitely_fresh] = get_or_create_arena(true);
+        auto arena_it = _arena_it; // work around dump local binding clang bug
+        defer ( // i'm definitely going to allocate, check _afterwards_ if i should remove the arena
+            if (arena_it->second.is_full()) {
+                assert(arena_it == arenas_with_free_entries.back());
+                arenas_with_free_entries.pop_back();
+            }
+        );
+
         if (is_definitely_fresh) // we either found fresh blocks in this arena or we just created it
             return arena_it->second.zalloc();
         
