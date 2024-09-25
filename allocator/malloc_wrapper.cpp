@@ -1,5 +1,7 @@
 #include "nooballoc.h"
 
+#include <NOOB/config.h>
+
 #include <malloc.h>
 #include <stdlib.h>
 #include <assert.h>

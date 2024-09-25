@@ -1,5 +1,7 @@
 #include "nooballoc.h"
 
+#include <NOOB/config.h>
+
 #include <errno.h>
 #include <linux/prctl.h>
 #include <stddef.h>
@@ -18,7 +20,7 @@
 #include <bitset>
 #include <map>
 
-#define TAG_POINTERS 1
+#define TAG_POINTERS 0
 
 #define NUM_BLOCKS_IN_ARENA (1ULL << TAG_WIDTH)
 

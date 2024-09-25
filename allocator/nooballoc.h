@@ -1,7 +1,5 @@
 #pragma once
 
-#include <NOOB/config.h>
-
 #include <stddef.h>
 
 void noob_non_allocating_printf(const char* fmt, ...);
