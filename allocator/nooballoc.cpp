@@ -21,7 +21,7 @@
 #include <map>
 #include <functional>
 
-#define TAG_POINTERS 0
+#define TAG_POINTERS 1
 
 #define NUM_BLOCKS_IN_ARENA (1ULL << TAG_WIDTH)
 
@@ -274,8 +274,10 @@ struct NOOBSizeAllocator {
         auto arena_it = _arena_it; // work around dump local binding clang bug
         defer ( // i'm definitely going to allocate, check _afterwards_ if i should remove the arena
             if (arena_it->second.is_full()) {
-                assert(arena_it == arenas_with_free_entries.back());
-                arenas_with_free_entries.pop_back();
+                // it's not necessarily the last one here!
+                auto it = std::find(arenas_with_free_entries.begin(), arenas_with_free_entries.end(), arena_it);
+                assert(it != arenas_with_free_entries.end());
+                arenas_with_free_entries.erase(it);
             }
         );
 
