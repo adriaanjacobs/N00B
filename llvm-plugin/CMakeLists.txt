@@ -5,7 +5,7 @@ message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 add_subdirectory(llvm-utils/)
 
 # The below part can be moved into its own subdirectory if you want (I typically do it like that)
-add_library(llvmnoob SHARED llvm_noob.cpp)
+add_library(llvmnoob SHARED llvm_noob.cpp llvm_noob_plugin.cpp)
 target_compile_options(llvmnoob PUBLIC 
                             -std=c++20 -Wall -Wextra -Werror=return-type -Wimplicit-fallthrough -Wno-unused-parameter -Wno-unused-variable
                             -ggdb -fPIC -fno-rtti
