@@ -378,12 +378,8 @@ struct NOOBAllocator {
 
 std::optional<NOOBAllocator> noob_allocator = std::nullopt;
 
-extern "C" void noob_initialize_noobstacks();
-
 void noob_init(size_t max_radix, bool* hooked) {
     assert(!noob_allocator.has_value() && "NOOB is already initialized!");
-    // implemented in hardened program, calls `noob_allocate_noobstacks`
-    noob_initialize_noobstacks();
     noob_allocator.emplace(max_radix, hooked);
 }
 
