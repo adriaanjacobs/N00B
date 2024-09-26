@@ -106,23 +106,31 @@ size_t arena_idx_in_size_region(uintptr_t ptr) {
     return arena_idx_in_size_region(ptr, radix);
 }
 
-static void* mmap_for_arena(uint8_t in_pointer_radix, size_t mapping_size, void* suggested_location) {
+// finds & returns an aligned mapping of size `size` containing `in_pointer_radix` in the radix bits
+static void* mmap_for_arena(uint8_t in_pointer_radix, size_t alignment, size_t size, void* suggested_location) {
+    assert(extract_radix((uintptr_t) suggested_location) == in_pointer_radix);
+    assert(alignment >= 0x1000);
+    assert(size % 0x1000 == 0);
+    assert(__builtin_is_aligned(suggested_location, alignment));
+
+    // round-robin try out all the possibilities
     auto aloc = (uintptr_t) suggested_location;
-    assert(extract_radix(aloc) == in_pointer_radix);
-    while (true) { // round-robin try out all the possibilities
+    while (true) { 
         // check if available
-        auto possible_base = mmap64((void*) aloc, mapping_size, PROT_NONE, MAP_ANON|MAP_PRIVATE|MAP_NORESERVE|MAP_FIXED_NOREPLACE, -1, 0);
+        auto possible_base = mmap64((void*) aloc, size, PROT_NONE, MAP_ANON|MAP_PRIVATE|MAP_NORESERVE|MAP_FIXED_NOREPLACE, -1, 0);
         if (possible_base != MAP_FAILED)
             break;
         ASSERT_ELSE_PERROR(errno == EEXIST);
 
         // increment & mask
-        aloc = aloc + ((aloc - size_region_base(in_pointer_radix)) % size_region_size());
-
+        aloc += alignment;
+        aloc = size_region_base(in_pointer_radix) + ((aloc - size_region_base(in_pointer_radix)) % size_region_size());
+        
         // if we've gone all the way around, then we couldn't find any possible mapping
         assert(aloc != (uintptr_t) suggested_location && "No more VM space available");
     }
     // we've found one at aloc
+    assert((void*) aloc != MAP_FAILED);
     return (void*) aloc;
 }
 
@@ -157,7 +165,7 @@ struct NOOBArena {
         free_status.flip(); // set all to free
         fresh_status.flip(); // at first, all blocks are fresh
 
-        bottom_of_three_base = mmap_for_arena(radix, 3*single_arena_size(radix), suggested_location);
+        bottom_of_three_base = mmap_for_arena(radix, single_arena_size(radix), 3*single_arena_size(radix), suggested_location);
         base = (void*) ((uintptr_t) bottom_of_three_base + single_arena_size(radix));
         // get rw access to the actual arena in the middle
         ASSERT_ELSE_PERROR(mprotect(base, single_arena_size(radix), PROT_READ|PROT_WRITE) == 0);
@@ -370,8 +378,12 @@ struct NOOBAllocator {
 
 std::optional<NOOBAllocator> noob_allocator = std::nullopt;
 
+extern "C" void noob_initialize_noobstacks();
+
 void noob_init(size_t max_radix, bool* hooked) {
     assert(!noob_allocator.has_value() && "NOOB is already initialized!");
+    // implemented in hardened program, calls `noob_allocate_noobstacks`
+    noob_initialize_noobstacks();
     noob_allocator.emplace(max_radix, hooked);
 }
 
@@ -417,18 +429,15 @@ size_t noob_usable_size(void* ptr) {
     return 1ULL << radix;
 }
 
-extern "C" void noob_allocate_stacks(void** stack_array, uint8_t start_radix, unsigned num_stacks) {
-    assert(start_radix >= 3 && "We don't map noobstacks for stack objects too small");
-    assert((start_radix + num_stacks < std::bit_width(NOOB_STACK_SIZE) && "We don't map noobstacks for objects > NOOB_STACK_SIZE"));
-    for (uint i = 0; i < num_stacks; i++) {
-        auto radix = start_radix + i;
+extern "C" void noob_allocate_stacks(void** stack_array, uint8_t lowest_radix, uint8_t highest_radix) {
+    assert(highest_radix >= lowest_radix);
+    assert(lowest_radix >= 3 && "We don't map noobstacks for stack objects too small");
+    assert(highest_radix < std::bit_width(NOOB_STACK_SIZE) && "We don't map noobstacks for objects > NOOB_STACK_SIZE");
+    for (uint radix = lowest_radix; radix <= highest_radix; radix++) {
         // let's try to map this immediately at the start of the size region
-        auto stack = mmap_for_arena(radix, NOOB_STACK_SIZE, (void*) size_region_base(radix));
+        auto stack = mmap_for_arena(radix, std::max(0x1000ULL, (1ULL << radix)), NOOB_STACK_SIZE, (void*) size_region_base(radix));
         // we leave a guard page at the end here to detect stack overflow
-        if (mprotect(stack, NOOB_STACK_SIZE - 0x1000, PROT_READ|PROT_WRITE)) {
-            perror("mprotect noobstack");
-            exit(-1);
-        }
-        stack_array[i] = stack;
+        ASSERT_ELSE_PERROR(mprotect(stack, NOOB_STACK_SIZE - 0x1000, PROT_READ|PROT_WRITE) == 0);
+        stack_array[radix] = stack;
     }
 }

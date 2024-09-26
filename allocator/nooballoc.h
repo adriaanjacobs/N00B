@@ -19,4 +19,4 @@ void* noob_calloc(size_t nbytes);
 
 size_t noob_usable_size(void* ptr);
 
-extern "C" void noob_allocate_stacks(void** stack_array, uint8_t start_radix, unsigned num_stacks);
+extern "C" void noob_allocate_stacks(void** stack_array, uint8_t lowest_radix, uint8_t highest_radix);
