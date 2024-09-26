@@ -42,8 +42,8 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         }
     }
 
-    // now move all unsafe stack objects to per-size noobstacks
-    // create an array of per-size noob-stackptrs
+    // now move all unsafe stack objects to per-radix noobstacks
+    // create an array of per-radix noob-stackptrs
     auto& context = module.getContext();
     auto noobStackPtrArrayType = llvm::ArrayType::get(llvm::Type::getInt8PtrTy(context), 64);
     auto noobStackPtrArray = new llvm::GlobalVariable(
@@ -61,7 +61,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         if (func.isDeclaration())
             continue;
 
-        llvm::DenseMap<llvm::TypeSize::ScalarTy, llvm::SmallVector<llvm::AllocaInst*>> sizeToUnsafeAllocas;
+        llvm::DenseMap<llvm::TypeSize::ScalarTy, llvm::SmallVector<llvm::AllocaInst*>> radixToUnsafeAllocas;
         for (auto& inst : llvm::instructions(func)) {
             if (auto alloca = llvm::dyn_cast<llvm::AllocaInst>(&inst)) {
                 if (!stackSafetyAnalysis.isSafe(*alloca)) {
@@ -70,28 +70,29 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                     auto sizeInBits = sizeInBitsOpt->getFixedSize(); // may fail for VLAs still
                     auto sizeInBytes = __builtin_align_up(sizeInBits, 8) / 8;
                     auto alignedSizeInBytes = std::bit_ceil(sizeInBytes);
+                    auto radix = std::bit_width(alignedSizeInBytes) - 1;
                     ASSERT_ELSE_UNKOWN(alignedSizeInBytes >= alloca->getAlign().value(), alloca); // otherwise choose the max of both
-                    sizeToUnsafeAllocas[alignedSizeInBytes].push_back(alloca);
+                    radixToUnsafeAllocas[radix].push_back(alloca);
                 }
             }
         }
 
         auto insertBefore = &*func.getEntryBlock().getFirstInsertionPt();
         llvm::DenseMap<llvm::AllocaInst*, llvm::Value*> allocaToNewStackAlloc;
-        for (auto& [size, allocas] : sizeToUnsafeAllocas) {
-            // retrieve the "thread-local" stack pointer for this size class
-            auto addressOfSizeStackPtr = llvm::ConstantExpr::getInBoundsGetElementPtr(llvm::Type::getInt8PtrTy(context), noobStackPtrArray, llvm::ConstantInt::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt{64, size}));
-            auto sizeStackPtr = new llvm::LoadInst(llvm::Type::getInt8PtrTy(context), addressOfSizeStackPtr, llvm::formatv("noob.stackptr.{0}", size), insertBefore);
+        for (auto& [radix, allocas] : radixToUnsafeAllocas) {
+            // retrieve the "thread-local" stack pointer for this radix
+            auto addressOfRadixStackPtr = llvm::ConstantExpr::getInBoundsGetElementPtr(llvm::Type::getInt8PtrTy(context), noobStackPtrArray, llvm::ConstantInt::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt{64, radix}));
+            auto radixStackPtr = new llvm::LoadInst(llvm::Type::getInt8PtrTy(context), addressOfRadixStackPtr, llvm::formatv("noob.stackptr.{0}", radix), insertBefore);
 
             // now allocate the necessary amount for this function and update the stackPtr slot in memory
             auto numObjects = allocas.size();
-            auto endOfSizeStackPtr = llvm::GetElementPtrInst::CreateInBounds(llvm::Type::getInt8Ty(context), sizeStackPtr, {llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt{64, numObjects * size})}, "", insertBefore);
-            new llvm::StoreInst(endOfSizeStackPtr, addressOfSizeStackPtr, insertBefore);
+            auto endOfRadixStackPtr = llvm::GetElementPtrInst::CreateInBounds(llvm::Type::getInt8Ty(context), radixStackPtr, {llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt{64, numObjects * (1ULL << radix)})}, "", insertBefore);
+            new llvm::StoreInst(endOfRadixStackPtr, addressOfRadixStackPtr, insertBefore);
 
             // now create the offset pointers that represent the individual allocas
             for (uint idx = 0; idx < allocas.size(); idx++) {
                 auto alloca = allocas[idx];
-                auto offsetStackPtr = llvm::GetElementPtrInst::CreateInBounds(llvm::Type::getInt8Ty(context), sizeStackPtr, {llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt{64, idx * size})}, "", alloca);
+                auto offsetStackPtr = llvm::GetElementPtrInst::CreateInBounds(llvm::Type::getInt8Ty(context), radixStackPtr, {llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt{64, idx * (1ULL << radix)})}, "", alloca);
                 // i needn't concern myself with marking these as "noalias" here -- we should only do this at the very end of the optimization pipeline
                 // any optimizations that benefit from the aliasing information should have been done by now
                 auto castedPtr = llvm::CastInst::CreatePointerCast(offsetStackPtr, alloca->getType(), alloca->getName(), alloca);
@@ -105,7 +106,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                 if (auto ret = llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator())) {
                     // for now, we're lazy and use the old stackPtr, as a kind of "frame pointer"
                     // we might potentially get better results by loading back from memory & recomputing here
-                    new llvm::StoreInst(sizeStackPtr, addressOfSizeStackPtr, ret);
+                    new llvm::StoreInst(radixStackPtr, addressOfRadixStackPtr, ret);
                 }
             }
         }
