@@ -22,6 +22,7 @@
 #include <functional>
 
 #define TAG_POINTERS 1
+#define NOOB_STACK_SIZE (1ULL * 1024 * 1024)
 
 #define NUM_BLOCKS_IN_ARENA (1ULL << TAG_WIDTH)
 
@@ -105,6 +106,26 @@ size_t arena_idx_in_size_region(uintptr_t ptr) {
     return arena_idx_in_size_region(ptr, radix);
 }
 
+static void* mmap_for_arena(uint8_t in_pointer_radix, size_t mapping_size, void* suggested_location) {
+    auto aloc = (uintptr_t) suggested_location;
+    assert(extract_radix(aloc) == in_pointer_radix);
+    while (true) { // round-robin try out all the possibilities
+        // check if available
+        auto possible_base = mmap64((void*) aloc, mapping_size, PROT_NONE, MAP_ANON|MAP_PRIVATE|MAP_NORESERVE|MAP_FIXED_NOREPLACE, -1, 0);
+        if (possible_base != MAP_FAILED)
+            break;
+        ASSERT_ELSE_PERROR(errno == EEXIST);
+
+        // increment & mask
+        aloc = aloc + ((aloc - size_region_base(in_pointer_radix)) % size_region_size());
+
+        // if we've gone all the way around, then we couldn't find any possible mapping
+        assert(aloc != (uintptr_t) suggested_location && "No more VM space available");
+    }
+    // we've found one at aloc
+    return (void*) aloc;
+}
+
 struct NOOBArena {
     std::bitset<NUM_BLOCKS_IN_ARENA> free_status;
     // fresh blocks have never been allocated before
@@ -135,24 +156,9 @@ struct NOOBArena {
     {
         free_status.flip(); // set all to free
         fresh_status.flip(); // at first, all blocks are fresh
-        auto aloc = (uintptr_t) suggested_location;
-        while (true) { // round-robin try out all the possibilities
-            // check if available
-            auto possible_base = mmap64((void*) aloc, 3*single_arena_size(radix), PROT_NONE, MAP_ANON|MAP_PRIVATE|MAP_NORESERVE|MAP_FIXED_NOREPLACE, -1, 0);
-            if (possible_base != MAP_FAILED)
-                break;
-            ASSERT_ELSE_PERROR(errno == EEXIST);
 
-            // increment & mask
-            aloc = aloc + ((aloc - size_region_base(radix)) % size_region_size());
-
-            // if we've gone all the way around, then we couldn't find any possible mapping
-            assert(aloc != (uintptr_t) suggested_location && "No more VM space available");
-        }
-
-        // we've found one at aloc
-        bottom_of_three_base = (void*) aloc;
-        base = (void*) (aloc + single_arena_size(radix));
+        bottom_of_three_base = mmap_for_arena(radix, 3*single_arena_size(radix), suggested_location);
+        base = (void*) ((uintptr_t) bottom_of_three_base + single_arena_size(radix));
         // get rw access to the actual arena in the middle
         ASSERT_ELSE_PERROR(mprotect(base, single_arena_size(radix), PROT_READ|PROT_WRITE) == 0);
 
@@ -409,4 +415,20 @@ void* noob_calloc(size_t nbytes) {
 size_t noob_usable_size(void* ptr) {
     auto radix = extract_radix((uintptr_t) ptr);
     return 1ULL << radix;
+}
+
+extern "C" void noob_allocate_stacks(void** stack_array, uint8_t start_radix, unsigned num_stacks) {
+    assert(start_radix >= 3 && "We don't map noobstacks for stack objects too small");
+    assert((start_radix + num_stacks < std::bit_width(NOOB_STACK_SIZE) && "We don't map noobstacks for objects > NOOB_STACK_SIZE"));
+    for (uint i = 0; i < num_stacks; i++) {
+        auto radix = start_radix + i;
+        // let's try to map this immediately at the start of the size region
+        auto stack = mmap_for_arena(radix, NOOB_STACK_SIZE, (void*) size_region_base(radix));
+        // we leave a guard page at the end here to detect stack overflow
+        if (mprotect(stack, NOOB_STACK_SIZE - 0x1000, PROT_READ|PROT_WRITE)) {
+            perror("mprotect noobstack");
+            exit(-1);
+        }
+        stack_array[i] = stack;
+    }
 }

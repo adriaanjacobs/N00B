@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 void noob_non_allocating_printf(const char* fmt, ...);
 
@@ -17,3 +18,5 @@ void* noob_memalign(size_t alignment, size_t size);
 void* noob_calloc(size_t nbytes);
 
 size_t noob_usable_size(void* ptr);
+
+extern "C" void noob_allocate_stacks(void** stack_array, uint8_t start_radix, unsigned num_stacks);
