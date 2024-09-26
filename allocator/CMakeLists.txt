@@ -9,6 +9,7 @@ set(COMMON_CXX_OPTIONS
 
 add_library(nooballoc SHARED nooballoc.cpp malloc_wrapper.cpp)
 target_compile_options(nooballoc PUBLIC ${COMMON_CXX_OPTIONS})
+target_link_libraries(nooballoc "-ldl")
 
 add_executable(test_noob test.cpp)
 target_compile_options(test_noob PUBLIC
