@@ -79,6 +79,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                         auto sizeInBits = sizeInBitsOpt->getFixedSize(); // may fail for VLAs still
                         auto sizeInBytes = __builtin_align_up(sizeInBits, 8) / 8;
                         auto alignedSizeInBytes = std::bit_ceil(sizeInBytes);
+                        alignedSizeInBytes = std::max(alignedSizeInBytes, alloca->getAlign().value()); // if alignment is greater, get it
                         auto radix = std::max(3UL, std::bit_width(alignedSizeInBytes) - 1);
 
                         // keep track of the max and min radix here
@@ -87,7 +88,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                         if (radix > highestRadix)
                             highestRadix = radix;
 
-                        ASSERT_ELSE_UNKOWN(alignedSizeInBytes >= alloca->getAlign().value(), alloca); // otherwise choose the max of both
+                        ASSERT_ELSE_UNKOWN(alignedSizeInBytes >= alloca->getAlign().value(), alloca);
                         radixToUnsafeAllocas[radix].push_back(alloca);
                     }
                 }
