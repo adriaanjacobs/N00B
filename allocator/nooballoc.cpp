@@ -21,7 +21,7 @@
 #include <map>
 #include <functional>
 
-#define TAG_POINTERS 1
+#define TAG_POINTERS 0
 #define NOOB_STACK_SIZE (1ULL * 1024 * 1024)
 
 #define NUM_BLOCKS_IN_ARENA (1ULL << TAG_WIDTH)
@@ -426,12 +426,14 @@ size_t noob_usable_size(void* ptr) {
 }
 
 extern "C" void noob_allocate_stacks(void** stack_array, uint8_t lowest_radix, uint8_t highest_radix) {
+    fprintf(stderr, "Allocating NOOB stacks between %d and %d...\n", lowest_radix, highest_radix);
     assert(highest_radix >= lowest_radix);
     assert(lowest_radix >= 3 && "We don't map noobstacks for stack objects too small");
     assert(highest_radix < std::bit_width(NOOB_STACK_SIZE) && "We don't map noobstacks for objects > NOOB_STACK_SIZE");
     for (uint radix = lowest_radix; radix <= highest_radix; radix++) {
         // let's try to map this immediately at the start of the size region
         auto stack = mmap_for_arena(radix, std::max(0x1000ULL, (1ULL << radix)), NOOB_STACK_SIZE, (void*) size_region_base(radix));
+        assert(extract_radix((uintptr_t) stack) == radix);
         // we leave a guard page at the end here to detect stack overflow
         ASSERT_ELSE_PERROR(mprotect(stack, NOOB_STACK_SIZE - 0x1000, PROT_READ|PROT_WRITE) == 0);
         stack_array[radix] = stack;

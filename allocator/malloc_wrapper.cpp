@@ -53,6 +53,7 @@ extern "C" void noob_initialize_noobstacks() __attribute__((weak));
 
 [[gnu::constructor(0)]]
 void init_noob() {
+    fprintf(stderr, "Initializing NOOB...\n");
     if (noob_initialize_noobstacks) // the function exists. we are linked into a hardened NOOB program
         noob_initialize_noobstacks();
 
