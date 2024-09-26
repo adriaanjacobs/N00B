@@ -97,8 +97,6 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                 // any optimizations that benefit from the aliasing information should have been done by now
                 auto castedPtr = llvm::CastInst::CreatePointerCast(offsetStackPtr, alloca->getType(), alloca->getName(), alloca);
                 alloca->replaceAllUsesWith(castedPtr);
-                alloca->eraseFromParent();
-                allocas[idx] = nullptr; // just to make sure we dont access this again
             }
 
             // now insert the deallocation routine at all `return` locations of this function
@@ -108,6 +106,14 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                     // we might potentially get better results by loading back from memory & recomputing here
                     new llvm::StoreInst(radixStackPtr, addressOfRadixStackPtr, ret);
                 }
+            }
+        }
+
+        // now delete all these allocas. we couldn't do this before because `insertBefore` was likely one of them
+        for (auto& [_, allocas] : radixToUnsafeAllocas) {
+            for (auto& alloca : allocas) {
+                alloca->eraseFromParent();
+                alloca = nullptr; // just to make sure we dont access this again
             }
         }
     }

@@ -5,12 +5,31 @@
 #include <malloc.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <dlfcn.h>
 
 #include <iterator>
 #include <bit>
 #include <functional>
 #include <type_traits>
 #include <iostream>
+
+#define DLSYM(handle, funcname) ({                                                                  \
+    dlerror(); /* clear dlsym errors  */                                                            \
+    decltype(funcname)* _func = reinterpret_cast<decltype(funcname)*>(dlsym(handle, #funcname));    \
+    if (const char* error = dlerror()) {                                                            \
+        fprintf(stderr, "dlsym: %s\n", error);                                                      \
+        exit(-1);                                                                                   \
+    }                                                                                               \
+    _func;                                                                                          \
+})
+
+#define LAZY_DLSYM_FN(func)                         \
+    static decltype(func)* func##_fn () {           \
+        static auto fn = DLSYM(RTLD_NEXT, func);    \
+        return fn;                                  \
+    }
+
+LAZY_DLSYM_FN(malloc_usable_size);
 
 bool hooked = false;
 
@@ -116,9 +135,8 @@ void* calloc(size_t nmemb, size_t size) {
     return LOGGED_CALL(noob_calloc, nmemb * size);
 }
 
-decltype(malloc_usable_size) __libc_malloc_usable_size;
 size_t malloc_usable_size(void* ptr) {
-    IF_NOT_HOOKED(__libc_malloc_usable_size(ptr));
+    IF_NOT_HOOKED(malloc_usable_size_fn()(ptr));
     return LOGGED_CALL(noob_usable_size, ptr);
 }
 
