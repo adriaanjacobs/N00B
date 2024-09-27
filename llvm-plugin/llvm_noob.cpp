@@ -135,28 +135,30 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             }
         }
 
-        llvm::errs() << "All stack object radices were between " << (int) lowestRadix << " and " << (int) highestRadix << ".\n";
+        if (highestRadix) { // don't do anything if we didnt find a single stack alloc (e.g. specrand)
+            llvm::errs() << "All stack object radices were between " << (int) lowestRadix << " and " << (int) highestRadix << ".\n";
 
-        // now insert a function to call NOOB's stack allocation function to initialize the stackptr array
-        // it will be called from the noob initialization routine
-        // void noob_allocate_stacks(void** stack_array, uint8_t start_radix, uint8_t num_stacks);
-        auto ptrToVoidPtrTy = llvm::PointerType::getUnqual(llvm::Type::getInt8PtrTy(context));
-        auto noob_allocate_stacks_fn = module.getOrInsertFunction("noob_allocate_stacks", llvm::Type::getVoidTy(context), ptrToVoidPtrTy, llvm::Type::getInt8Ty(context), llvm::Type::getInt8Ty(context));
-        auto noob_initialize_noobstacks_fn = module.getOrInsertFunction("noob_initialize_noobstacks", llvm::Type::getVoidTy(context));
-        auto initializeNoobStacks = llvm::cast<llvm::Function>(noob_initialize_noobstacks_fn.getCallee());
-        auto entry = llvm::BasicBlock::Create(context, "entry", initializeNoobStacks);
-        auto insertBefore = llvm::ReturnInst::Create(context, entry);
-        auto call_noob_allocate_stacks_fn = llvm::CallInst::Create(
-            noob_allocate_stacks_fn, 
-            {
-                    llvm::ConstantExpr::getBitCast(noobStackPtrArray, ptrToVoidPtrTy), 
-                    llvm::Constant::getIntegerValue(llvm::Type::getInt8Ty(context), 
-                    llvm::APInt{8, lowestRadix}), 
-                    llvm::Constant::getIntegerValue(llvm::Type::getInt8Ty(context), 
-                    llvm::APInt{8, highestRadix})
-                }, 
-            "", insertBefore
-        );
+            // now insert a function to call NOOB's stack allocation function to initialize the stackptr array
+            // it will be called from the noob initialization routine
+            // void noob_allocate_stacks(void** stack_array, uint8_t start_radix, uint8_t num_stacks);
+            auto ptrToVoidPtrTy = llvm::PointerType::getUnqual(llvm::Type::getInt8PtrTy(context));
+            auto noob_allocate_stacks_fn = module.getOrInsertFunction("noob_allocate_stacks", llvm::Type::getVoidTy(context), ptrToVoidPtrTy, llvm::Type::getInt8Ty(context), llvm::Type::getInt8Ty(context));
+            auto noob_initialize_noobstacks_fn = module.getOrInsertFunction("noob_initialize_noobstacks", llvm::Type::getVoidTy(context));
+            auto initializeNoobStacks = llvm::cast<llvm::Function>(noob_initialize_noobstacks_fn.getCallee());
+            auto entry = llvm::BasicBlock::Create(context, "entry", initializeNoobStacks);
+            auto insertBefore = llvm::ReturnInst::Create(context, entry);
+            auto call_noob_allocate_stacks_fn = llvm::CallInst::Create(
+                noob_allocate_stacks_fn, 
+                {
+                        llvm::ConstantExpr::getBitCast(noobStackPtrArray, ptrToVoidPtrTy), 
+                        llvm::Constant::getIntegerValue(llvm::Type::getInt8Ty(context), 
+                        llvm::APInt{8, lowestRadix}), 
+                        llvm::Constant::getIntegerValue(llvm::Type::getInt8Ty(context), 
+                        llvm::APInt{8, highestRadix})
+                    }, 
+                "", insertBefore
+            );
+        }
     }
 #endif
 
