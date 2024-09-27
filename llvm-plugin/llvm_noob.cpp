@@ -73,7 +73,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             llvm::DenseMap<llvm::TypeSize::ScalarTy, llvm::SmallVector<llvm::AllocaInst*>> radixToUnsafeAllocas;
             for (auto& inst : llvm::instructions(func)) {
                 if (auto alloca = llvm::dyn_cast<llvm::AllocaInst>(&inst)) {
-                    if (!stackSafetyAnalysis.isSafe(*alloca)) {
+                    if (!stackSafetyAnalysis.isSafe(*alloca) && alloca->isStaticAlloca()) {
                         auto sizeInBitsOpt = alloca->getAllocationSizeInBits(module.getDataLayout());
                         ASSERT_ELSE_UNKOWN(sizeInBitsOpt.hasValue(), alloca); // will fail for VLAs
                         auto sizeInBits = sizeInBitsOpt->getFixedSize(); // may fail for VLAs still
