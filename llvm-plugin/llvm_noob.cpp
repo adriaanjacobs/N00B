@@ -1,6 +1,7 @@
 #include "llvm_noob.h"
 
 #include <NOOB/config.h>
+#include <NOOB/memlayout.h>
 
 #include <llvm-utils/util.h>
 #include <llvm-utils/safetyanalysis/safetyanalysis.h>
@@ -9,8 +10,121 @@
 #include <llvm/IR/InstIterator.h>
 #include <llvm/Support/FormatVariadic.h>
 #include <llvm/Analysis/StackSafetyAnalysis.h>
+#include <llvm/Support/Process.h>
+
+#include <sstream>
+
+std::string executeCommand(const std::string &command) {
+    std::array<char, 128> buffer;
+    std::string result;
+
+    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(command.c_str(), "r"), pclose);
+    if (!pipe) {
+        perror("popen() failed!");
+        assert(false);
+    }
+
+    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+        result += buffer.data();
+    }
+
+    return result;
+}
 
 llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm::ModuleAnalysisManager& MAM) {
+
+#if REMAP_GLOBAS
+    {
+        // first find all the globals we want to wrap, compute their radix, and set the minimum alignment
+        // FIXME: for now, just wrap them all
+        // std::map so we get it nice and ordered
+        std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> radixToGlobals;
+        for (auto& global : module.globals()) {
+            // i dont know what to do with globals that already have a section
+            ASSERT_ELSE_UNKOWN(global.getSection() == "", &global);
+            // according to the lowfat guys, the linker will ignore our section attribute for symbols with common linkage
+            ASSERT_ELSE_UNKOWN(!global.hasCommonLinkage(), &global);
+            unsigned long alignTo = module.getDataLayout().getTypeAllocSize(global.getValueType()).getFixedSize();
+            alignTo = std::max(alignTo, global.getAlign()->value());
+            if (alignTo < 16)
+                alignTo = 16;
+            auto radix = std::bit_width(alignTo) - 1;
+            global.setAlignment(llvm::Align{(1ULL << radix)});
+            radixToGlobals[radix].push_back(&global);
+        }
+
+        // print it out for debugging
+        for (auto& [radix, globals] : radixToGlobals) {
+            llvm::outs() << "Radix " << radix << ", " << globals.size() << " globals. Size: " << (1ULL << radix) * globals.size() << "B\n";
+        }
+
+        // then generate the linker script to allocate the appropriate number of sections
+
+        // LLD doesnt have a default linker script, and, hence, does not support the script syntax to "extend" it
+        // instead, we get the default linker script from `ld.bfd` here and manually extend it
+        std::string defaultLinkerScript = executeCommand("ld.bfd --verbose");
+
+        { // clean it up a bit
+            // erase the random "help" preamble
+            auto marker = std::string_view{"=================================================="};
+            size_t pos = defaultLinkerScript.find_first_of(marker);
+            assert(pos != std::string::npos);
+            defaultLinkerScript.erase(0, pos + marker.length());
+            // erase the marker at the end too
+            pos = defaultLinkerScript.find_last_of(marker);
+            assert(pos != std::string::npos);
+            defaultLinkerScript.erase(pos - marker.length(), pos);
+        }
+
+        // now extend the script with the custom sections
+        std::stringstream sections;
+        sections << "\nSECTIONS\n{\n";
+        for (auto& [radix, globals] : radixToGlobals) {
+            assert(radix < 20); // idx why we'd need globals larger than this
+            assert(radix >= 4); // otherwise we have to update the linker script additions to avoid non-page aligned memory regions
+            assert(std::popcount(single_arena_size(radix)) == 1);
+            auto needed_size =  (1ULL << radix) * globals.size();
+            auto num_occupied_arenas = __builtin_align_up(needed_size, single_arena_size(radix)) / single_arena_size(radix);
+            // always start and end with a reserved region
+            auto needed_arenas = 1 + num_occupied_arenas * 2;
+            // layout is: reserved | repeat [occupied | reserved]
+            for (uint i = 0; i < needed_arenas; i++) {
+                std::string permissions = "!rwx";
+                std::string suffix = "RESERVED";
+                bool isReserved = i % 2 == 0; // odd index means occupied
+                if (!isReserved) {
+                    permissions = "rw!x";
+                    suffix = "OCCUPIED";
+                }
+                auto base_address = size_region_base(radix) + i * single_arena_size(radix);
+                auto memoryName = llvm::formatv("RADIX{0}_{1}_{2}", radix, i, suffix).str();
+                sections << llvm::formatv("  . = {0:x};\n", base_address).str();
+                sections << "  " << memoryName << " :\n  {\n";
+                sections << llvm::formatv("    KEEP(*({0}))\n", memoryName).str();
+                sections << "  }\n";
+            }
+
+            sections << "\n";
+
+            for (uint i = 0; i < globals.size(); i++) {
+                auto arena_idx = i / (1ULL << TAG_WIDTH);
+                auto memory_idx = 1 + arena_idx*2; // always odd
+
+                auto global = globals[i];
+                // global->setSection(llvm::formatv(".noob_globals_{0}_{1}", radix, memory_idx).str());
+            }
+        }
+        sections << "}\n";
+
+        defaultLinkerScript.append(sections.str());
+
+        std::error_code ec;
+        llvm::raw_fd_ostream linkerScript{"noob_linker_script.ld", ec};
+        assert(ec.value() == 0);
+
+        linkerScript << defaultLinkerScript;
+    }
+#endif
 
 #if CHECK_POINTER_DEREFERENCES
     {
