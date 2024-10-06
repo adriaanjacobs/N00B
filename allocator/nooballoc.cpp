@@ -1,6 +1,7 @@
 #include "nooballoc.h"
 
 #include <NOOB/config.h>
+#include <NOOB/memlayout.h>
 
 #include <errno.h>
 #include <linux/prctl.h>
@@ -10,7 +11,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
-#include <stdarg.h>
 #include <unistd.h>
 #include <sys/prctl.h>
 
@@ -23,8 +23,6 @@
 
 #define TAG_POINTERS 0
 #define NOOB_STACK_SIZE (1ULL * 1024 * 1024)
-
-#define NUM_BLOCKS_IN_ARENA (1ULL << TAG_WIDTH)
 
 #define ASSERT_ELSE_PERROR(cond) \
     do {                            \
@@ -49,48 +47,6 @@ struct run_on_destruct {
 #define CONCAT(x,y) CONCAT_(x,y)
 #define UNIQUE_VAR_NAME CONCAT(_unique_var_, __COUNTER__)
 #define defer(block) run_on_destruct UNIQUE_VAR_NAME{[&] () -> void { block; }}
-
-uintptr_t size_region_base(uint8_t radix) { 
-    return ((size_t) radix) << 42; 
-}
-
-size_t size_region_size() {
-    return (1ULL << 42); 
-}
-
-size_t block_size(uint8_t radix) {
-    return (1ULL << radix);
-}
-
-size_t single_arena_size(uint8_t radix) {
-    return NUM_BLOCKS_IN_ARENA * block_size(radix);
-}
-
-uint8_t extract_radix(uintptr_t ptr) {
-    return (ptr >> 42) & 0b0011'1111;
-}
-
-size_t extract_lowestMSBs(uintptr_t ptr) {
-    auto radix = extract_radix(ptr);
-    return (ptr >> radix) & (~0ULL >> (64 - TAG_WIDTH));
-}
-
-size_t extract_topbits(uintptr_t ptr) {
-    return ptr >> (64 - TAG_WIDTH);
-}
-
-size_t extract_offset(uintptr_t ptr) {
-    auto radix = extract_radix(ptr);
-    auto mask = (1ULL << radix) - 1;
-    return ptr & mask;
-}
-
-size_t extract_highestMSBs(uintptr_t ptr) {
-    auto radix = extract_radix(ptr);
-    ptr &= (~0ULL >> TAG_WIDTH); // clear the top bits
-    ptr >>= radix + TAG_WIDTH; // shift away the offset + lowestMSBs
-    return ptr;
-}
 
 template<typename T>
 T* noob_striptop(T* ptr) {
