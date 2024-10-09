@@ -5,6 +5,7 @@
 
 #include <llvm-utils/util.h>
 #include <llvm-utils/safetyanalysis/safetyanalysis.h>
+#include <llvm-utils/pointerdetection/pointerdetection.h>
 
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/InstIterator.h>
@@ -157,6 +158,46 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                 ASSERT_ELSE_UNKOWN(store, access);
                 store->setOperand(store->getPointerOperandIndex(), maskedPtr);
             }
+        }
+    }
+#endif
+
+#if CHECK_POINTER_ARITHMETIC
+    {
+        // compute the base pointer of pointer arithmetic, ensure it is always checked
+        auto& pointerInfo = MAM.getResult<PointerDetectionAnalysis>(module);
+        auto& unsafeAccessInfo = MAM.getResult<UnsafeAccessFinderAnalysis>(module).getOrCreate(false);
+        for (auto& access : unsafeAccessInfo.unsafeAccesses) {
+            auto insertBefore = access;
+            auto ptr = llvm::getLoadStorePointerOperand(access);
+            ASSERT_ELSE_UNKOWN(ptr, access);
+
+            auto base = pointerInfo.find_real_base(ptr);
+
+            // first borrow cuCatch's trick to propagate base pointers from source through selects/phis
+            // then insert an arithmetic check at all dereference sites
+
+            // finally, find all locations where pointers "escape" after having arithmetic applied: 
+            //  e.g., to external code, stored to memory, returned from function, etc.
+            // only match pointers that have not been checked by the dereference yet!
+            //  but _do_ match pointers that could have code paths from source on which they are not checked
+            // place an additional check there
+
+            // the arithmetic check will look like this:
+            /*
+                %baseint = ptrtoint ptr %base to i64
+                %ptrint = ptrtoint ptr %ptr to i64
+                %radix = compute_radix(%base)
+                %mask_invariant_bits = shl nsw i64 -512, %radix
+                %aritharea_base = and i64 %mask_invariant_bits, %baseint
+                %mask_variant_bits = xor i64 %mask_invariant_bits, -1
+                %masked_ptr = and i64 %mask_variant_bits, %ptrint
+                %diff = sub i64 %masked_ptr, %baseint
+                %2 = getelementptr i8, ptr %base, i64 %diff
+                %safe_ptr = getelementptr i8, ptr %2, i64 %aritharea_base
+            */
+
+            // compiles down to quite efficient assembly in both x86 and ARM
         }
     }
 #endif
