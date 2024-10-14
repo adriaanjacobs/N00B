@@ -78,11 +78,13 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         }
 
         // now extend the script with the custom sections
+        llvm::SmallVector<std::string> segmentNames;
         std::stringstream sections;
-        sections << "\nSECTIONS\n{\n";
+        sections << "\nSECTIONS {\n";
         for (auto& [radix, globals] : radixToGlobals) {
-            assert(radix < 20); // idx why we'd need globals larger than this
-            assert(radix >= 4); // otherwise we have to update the linker script additions to avoid non-page aligned memory regions
+            assert(radix < 20); // idk why we'd need globals larger than this
+            if (TAG_WIDTH <= 8)
+                assert(radix >= 4); // otherwise we have to update the linker script to avoid non-page aligned memory regions for TAG_WIDTH=8
             assert(std::popcount(single_arena_size(radix)) == 1);
             auto needed_size =  (1ULL << radix) * globals.size();
             auto num_occupied_arenas = __builtin_align_up(needed_size, single_arena_size(radix)) / single_arena_size(radix);
@@ -90,19 +92,15 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             auto needed_arenas = 1 + num_occupied_arenas * 2;
             // layout is: reserved | repeat [occupied | reserved]
             for (uint i = 0; i < needed_arenas; i++) {
-                std::string permissions = "!rwx";
                 std::string suffix = "RESERVED";
                 bool isReserved = i % 2 == 0; // odd index means occupied
-                if (!isReserved) {
-                    permissions = "rw!x";
+                if (!isReserved) 
                     suffix = "OCCUPIED";
-                }
                 auto base_address = size_region_base(radix) + i * single_arena_size(radix);
-                auto memoryName = llvm::formatv("RADIX{0}_{1}_{2}", radix, i, suffix).str();
-                sections << llvm::formatv("  . = {0:x};\n", base_address).str();
-                sections << "  " << memoryName << " :\n  {\n";
-                sections << llvm::formatv("    KEEP(*({0}))\n", memoryName).str();
-                sections << "  }\n";
+                auto segmentName = llvm::formatv("noob_globals_radix{0}_{1}_{2}", radix, i, suffix).str();
+                segmentNames.push_back(segmentName);
+                sections << llvm::formatv("  . = SEGMENT_START(\"{0}\", {1:x});\n", segmentName, base_address).str();
+                sections << llvm::formatv("  .{0} : { KEEP(*(.{0})) } : {0}\n", segmentName).str();
             }
 
             sections << "\n";
@@ -112,9 +110,15 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                 auto memory_idx = 1 + arena_idx*2; // always odd
 
                 auto global = globals[i];
-                // global->setSection(llvm::formatv(".noob_globals_{0}_{1}", radix, memory_idx).str());
+                // global->setSection(llvm::formatv(".noob_globals_radix{0}_{1}_{2}", radix, memory_idx, "OCCUPIED").str());
             }
         }
+        sections << "}\n";
+
+        // we have to specify all the segments in the PHDRS as well otherwise lld complains
+        sections << "\nPHDRS {\n";
+        for (auto& segmentName : segmentNames) 
+            sections << llvm::formatv("  {0} PT_LOAD;\n", segmentName).str();
         sections << "}\n";
 
         defaultLinkerScript.append(sections.str());
