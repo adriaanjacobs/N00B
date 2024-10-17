@@ -90,8 +90,12 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
 
         // we have to specify all the segments in the PHDRS as well otherwise lld complains
         sections << "\nPHDRS {\n";
-        for (auto& segmentName : segmentNames) 
-            sections << llvm::formatv("  {0} PT_LOAD;\n", segmentName).str();
+        for (auto& segmentName : segmentNames) {
+            std::string permissions = "0x0"; // "None"
+            if (segmentName.ends_with("OCCUPIED"))
+                permissions = "0x6"; // "PF_W + PF_R"
+            sections << llvm::formatv("  {0} PT_LOAD FLAGS({1});\n", segmentName, permissions).str();
+        }
         sections << "}\n";
 
         defaultLinkerScript.append(sections.str());
@@ -99,7 +103,6 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         std::error_code ec;
         llvm::raw_fd_ostream linkerScript{"noob_linker_script.ld", ec};
         assert(ec.value() == 0);
-
         linkerScript << defaultLinkerScript;
     }
 #endif
