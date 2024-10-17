@@ -15,22 +15,11 @@
 
 #include <sstream>
 
-std::string executeCommand(const std::string &command) {
-    std::array<char, 128> buffer;
-    std::string result;
-
-    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(command.c_str(), "r"), pclose);
-    if (!pipe) {
-        perror("popen() failed!");
-        assert(false);
-    }
-
-    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
-        result += buffer.data();
-    }
-
-    return result;
-}
+// LLD doesnt have a default linker script, and, hence, does not support the script syntax to "extend" it
+//  but Ruben wrote one for us that we can extend dynamically
+static std::string defaultLinkerScript {
+#include "lld.x86-64.ld"
+};
 
 llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm::ModuleAnalysisManager& MAM) {
 
@@ -59,25 +48,9 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             llvm::outs() << "Radix " << radix << ", " << globals.size() << " globals. Size: " << (1ULL << radix) * globals.size() << "B\n";
         }
 
-        // then generate the linker script to allocate the appropriate number of sections
-
-        // LLD doesnt have a default linker script, and, hence, does not support the script syntax to "extend" it
-        // instead, we get the default linker script from `ld.bfd` here and manually extend it
-        std::string defaultLinkerScript = executeCommand("ld.bfd --verbose");
-
-        { // clean it up a bit
-            // erase the random "help" preamble
-            auto marker = std::string_view{"=================================================="};
-            size_t pos = defaultLinkerScript.find_first_of(marker);
-            assert(pos != std::string::npos);
-            defaultLinkerScript.erase(0, pos + marker.length());
-            // erase the marker at the end too
-            pos = defaultLinkerScript.find_last_of(marker);
-            assert(pos != std::string::npos);
-            defaultLinkerScript.erase(pos - marker.length(), pos);
-        }
-
-        // now extend the script with the custom sections
+        // then extend the linker script to allocate the appropriate number of sections
+        // The plan is to generate a custom linker script, save it to `noob_linker_script.ld`, and then have the user specify that filename
+        //  on the command line as the -T parameter during linking. 
         llvm::SmallVector<std::string> segmentNames;
         std::stringstream sections;
         sections << "\nSECTIONS {\n";
@@ -110,7 +83,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                 auto memory_idx = 1 + arena_idx*2; // always odd
 
                 auto global = globals[i];
-                // global->setSection(llvm::formatv(".noob_globals_radix{0}_{1}_{2}", radix, memory_idx, "OCCUPIED").str());
+                global->setSection(llvm::formatv(".noob_globals_radix{0}_{1}_{2}", radix, memory_idx, "OCCUPIED").str());
             }
         }
         sections << "}\n";
