@@ -147,12 +147,15 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         // compute the base pointer of pointer arithmetic, ensure it is always checked
         auto& pointerInfo = MAM.getResult<PointerDetectionAnalysis>(module);
         auto& unsafeAccessInfo = MAM.getResult<UnsafeAccessFinderAnalysis>(module).getOrCreate(false);
+        BasePtrTracker basePtrTracker{module, MAM};
         for (auto& access : unsafeAccessInfo.unsafeAccesses) {
             auto insertBefore = access;
             auto ptr = llvm::getLoadStorePointerOperand(access);
             ASSERT_ELSE_UNKOWN(ptr, access);
 
-            auto base = pointerInfo.find_real_base(ptr);
+            auto trackedBase = basePtrTracker.trackBasePtr(ptr);
+
+            // now check the arithmetic on these
 
             // first borrow cuCatch's trick to propagate base pointers from source through selects/phis
             // then insert an arithmetic check at all dereference sites
