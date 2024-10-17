@@ -21,7 +21,6 @@
 #include <map>
 #include <functional>
 
-#define TAG_POINTERS 0
 #define NOOB_STACK_SIZE (1ULL * 1024 * 1024)
 
 #define ASSERT_ELSE_PERROR(cond) \
