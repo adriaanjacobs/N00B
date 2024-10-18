@@ -21,6 +21,23 @@ static std::string defaultLinkerScript {
 #include "lld.x86-64.ld"
 };
 
+static llvm::Value* computeRadix(llvm::Value* ptrAsInt, llvm::Instruction* insertBefore) {
+    auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
+    auto radix = llvm::BinaryOperator::CreateLShr(
+        ptrAsInt, 
+        llvm::ConstantInt::get(int64Ty, llvm::APInt{64, 42}), 
+        "", 
+        insertBefore
+    );
+    // it seems like this below does not end up in machine code with bmi2's shrx, because it automatically masks to qword width
+    return llvm::BinaryOperator::CreateAnd(
+        radix, 
+        llvm::ConstantInt::get(int64Ty, llvm::APInt{64, 0b0011'1111}), 
+        "", 
+        insertBefore
+    );
+}
+
 llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm::ModuleAnalysisManager& MAM) {
 
 #if REMAP_GLOBAS
@@ -107,83 +124,108 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
     }
 #endif
 
-#if CHECK_POINTER_DEREFERENCES
-    {
-        // instrument all pointer dereferences to verify that the top bits match the in-pointer bits
-        // get analysis results _before_ we start modifying the module
-        auto& unsafeAccessInfo = MAM.getResult<UnsafeAccessFinderAnalysis>(module).getOrCreate(false);
-        auto int64Ty = llvm::Type::getInt64Ty(module.getContext());
-        for (auto access : unsafeAccessInfo.unsafeAccesses) {
-            auto insertBefore = access;
-            auto ptr = llvm::getLoadStorePointerOperand(access);
-            ASSERT_ELSE_UNKOWN(ptr, access);
-
-            auto ptrAsInt = new llvm::PtrToIntInst(ptr, int64Ty, "", insertBefore);
-            auto radix = llvm::BinaryOperator::CreateLShr(ptrAsInt, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, 42}), "", insertBefore);
-            // it seems like this below does not end up in machine code with bmi2's shrx, because it automatically masks to qword width
-            radix = llvm::BinaryOperator::CreateAnd(radix, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, 0b0011'1111}), "", insertBefore);
-
-            // compute the mask to XOR with based on the lowest TAG_WIDTH bits of the base pointer
-            auto invariantBitMask = llvm::BinaryOperator::CreateLShr(ptrAsInt, radix, "", insertBefore);
-            invariantBitMask = llvm::BinaryOperator::CreateShl(invariantBitMask, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH}), "", insertBefore);
-
-            // xor the pointer and replace the access ptroperand
-            auto maskedPtrAsInt = llvm::BinaryOperator::CreateXor(ptrAsInt, invariantBitMask, "", insertBefore);
-            auto maskedPtr= new llvm::IntToPtrInst(maskedPtrAsInt, ptr->getType(), "", insertBefore);
-            
-            if (auto load = llvm::dyn_cast<llvm::LoadInst>(access))
-                load->setOperand(load->getPointerOperandIndex(), maskedPtr);
-            else {
-                auto store = llvm::cast<llvm::StoreInst>(access);
-                ASSERT_ELSE_UNKOWN(store, access);
-                store->setOperand(store->getPointerOperandIndex(), maskedPtr);
-            }
-        }
-    }
-#endif
-
-#if CHECK_POINTER_ARITHMETIC
+    // now instrument pointer arithmetic and dereferences
     {
         // compute the base pointer of pointer arithmetic, ensure it is always checked
+        // we borrow cuCatch's trick to propagate base pointers from source through selects/phis
+        //  this is implemented in "BasePtrTracker" and modifies the module
         auto& pointerInfo = MAM.getResult<PointerDetectionAnalysis>(module);
         auto& unsafeAccessInfo = MAM.getResult<UnsafeAccessFinderAnalysis>(module).getOrCreate(false);
         BasePtrTracker basePtrTracker{module, MAM};
+        struct CheckInfo {
+            llvm::Instruction* const access;
+            llvm::Value* ptrOperand;
+            llvm::Value* const trackedBase;
+
+            bool shouldCheckArith() const { 
+                return trackedBase != ptrOperand; 
+            }
+        };
+        llvm::SmallVector<CheckInfo> checkInfos;
         for (auto& access : unsafeAccessInfo.unsafeAccesses) {
-            auto insertBefore = access;
             auto ptr = llvm::getLoadStorePointerOperand(access);
             ASSERT_ELSE_UNKOWN(ptr, access);
-
+#if CHECK_POINTER_ARITHMETIC
             auto trackedBase = basePtrTracker.trackBasePtr(ptr);
-
-            // now check the arithmetic on these
-
-            // first borrow cuCatch's trick to propagate base pointers from source through selects/phis
-            // then insert an arithmetic check at all dereference sites
-
-            // finally, find all locations where pointers "escape" after having arithmetic applied: 
-            //  e.g., to external code, stored to memory, returned from function, etc.
-            // only match pointers that have not been checked by the dereference yet!
-            //  but _do_ match pointers that could have code paths from source on which they are not checked
-            // place an additional check there
-
-            // the arithmetic check will look like this:
-            /*
-                %baseint = ptrtoint ptr %base to i64
-                %ptrint = ptrtoint ptr %ptr to i64
-                %radix = compute_radix(%base)
-                %mask_invariant_bits = shl nsw i64 -512, %radix
-                %aritharea_base = and i64 %mask_invariant_bits, %baseint
-                %mask_variant_bits = xor i64 %mask_invariant_bits, -1
-                %masked_ptr = and i64 %mask_variant_bits, %ptrint
-                %diff = sub i64 %masked_ptr, %baseint
-                %2 = getelementptr i8, ptr %base, i64 %diff
-                %safe_ptr = getelementptr i8, ptr %2, i64 %aritharea_base
-            */
-
-            // compiles down to quite efficient assembly in both x86 and ARM
-        }
-    }
+#else
+            auto trackedBase = ptr; // will be detected and not cause arithcheck later
 #endif
+            checkInfos.push_back({access, ptr, trackedBase});
+        }
+
+        // now insert an arithmetic & tag check at all dereference sites
+        for (auto& checkInfo : checkInfos) {
+            auto& context = module.getContext();
+            auto int64Ty = llvm::Type::getInt64Ty(context);
+            auto int8PtrTy = llvm::Type::getInt8PtrTy(context);
+            auto int8Ty = llvm::Type::getInt8Ty(context);
+            auto insertBefore = checkInfo.access;
+
+            // compute radix from base! otherwise potentially overwritten in ptr
+            auto baseAsInt = llvm::CastInst::CreateBitOrPointerCast(checkInfo.trackedBase, int64Ty, "", insertBefore);
+            auto radix = computeRadix(baseAsInt, insertBefore);
+
+            // check if the dereferenced pointer is immediately loaded/created, i.e., no arithmetic happened on it
+            //  FIXME:: technically the trackedBase might still not contain any arithmetic despite being tracked
+            if (checkInfo.shouldCheckArith()) {
+                auto maskInvariantBits = llvm::BinaryOperator::CreateNSWShl(
+                    // FIXME: 512 is only the value for 8-bit tags!
+                    llvm::Constant::getIntegerValue(int64Ty, llvm::APInt{64, static_cast<uint64_t>(-512), true}),
+                    radix,
+                    "",
+                    insertBefore
+                );
+                auto arithAreaBase = llvm::BinaryOperator::CreateAnd(maskInvariantBits, baseAsInt, "", insertBefore);
+                
+                auto ptrAsInt = llvm::CastInst::CreateBitOrPointerCast(checkInfo.ptrOperand, int64Ty, "", insertBefore);
+                auto maskVariantBits = llvm::BinaryOperator::CreateXor(
+                    maskInvariantBits, 
+                    llvm::Constant::getIntegerValue(int64Ty, llvm::APInt{64, static_cast<uint64_t>(-1), true}), 
+                    "", 
+                    insertBefore
+                );
+                auto inArithAreaOffset = llvm::BinaryOperator::CreateAnd(maskVariantBits, ptrAsInt, "", insertBefore);
+                auto safePtrAsInt = llvm::BinaryOperator::CreateAdd(arithAreaBase, inArithAreaOffset, "", insertBefore);
+                auto diffWithBase = llvm::BinaryOperator::CreateSub(safePtrAsInt, baseAsInt, "", insertBefore);
+                auto baseAsInt8Ptr = llvm::CastInst::CreateBitOrPointerCast(checkInfo.trackedBase, int8PtrTy, "", insertBefore);
+                llvm::Instruction* provenancedSafePtr = llvm::GetElementPtrInst::Create(int8Ty, baseAsInt8Ptr, {diffWithBase}, "", insertBefore);
+                provenancedSafePtr = llvm::CastInst::CreateBitOrPointerCast(provenancedSafePtr, checkInfo.ptrOperand->getType(), "", insertBefore);
+
+                checkInfo.ptrOperand = provenancedSafePtr;
+            }
+
+            // now instrument all pointer dereferences to verify that the top bits match the in-pointer bits
+#if CHECK_POINTER_DEREFERENCES
+            {
+                auto ptr = checkInfo.ptrOperand;            
+                auto ptrAsInt = new llvm::PtrToIntInst(ptr, int64Ty, "", insertBefore);
+
+                // compute the mask to XOR with based on the lowest TAG_WIDTH bits of the base pointer
+                auto invariantBitMask = llvm::BinaryOperator::CreateLShr(ptrAsInt, radix, "", insertBefore);
+                invariantBitMask = llvm::BinaryOperator::CreateShl(invariantBitMask, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH}), "", insertBefore);
+
+                // xor the pointer and replace the access ptroperand
+                auto maskedPtrAsInt = llvm::BinaryOperator::CreateXor(ptrAsInt, invariantBitMask, "", insertBefore);
+                auto maskedPtr= new llvm::IntToPtrInst(maskedPtrAsInt, ptr->getType(), "", insertBefore);
+                checkInfo.ptrOperand = maskedPtr;
+            }
+#endif
+
+            if (auto load = llvm::dyn_cast<llvm::LoadInst>(checkInfo.access))
+                load->setOperand(load->getPointerOperandIndex(), checkInfo.ptrOperand);
+            else {
+                auto store = llvm::cast<llvm::StoreInst>(checkInfo.access);
+                ASSERT_ELSE_UNKOWN(store, checkInfo.access);
+                store->setOperand(store->getPointerOperandIndex(), checkInfo.ptrOperand);
+            }
+        }
+
+        // finally, find all locations where pointers "escape" after having arithmetic applied: 
+        //  e.g., to external code, stored to memory, returned from function, etc.
+        // only match pointers that have not been checked by the dereference yet!
+        //  but _do_ match pointers that could have code paths from source on which they are not checked
+        // place an additional check there
+    }
 
 #if REPLACE_STACK_ALLOCS
     {
