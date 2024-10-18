@@ -4,7 +4,7 @@
 - [ ] Re-introduce ASLR to the allocator
 - [x] Support `realloc`
 - Wrap & tag globals
-    - [ ] Generate a linker script on the fly
+    - [x] Generate a linker script on the fly
     - [ ] Do not wrap "safe" globals (I guess). Not sure if this really matters
     - [ ] Put read-only globals in read-only sections
 - Relocate and check stack allocations
@@ -19,6 +19,11 @@
 - [x] Support `calloc`
 - [ ] improve the initial freshness search in calloc's get_or_create_arena: SPEC06's `sphinx3` (and I think `gcc`, too) spend like 17-18% of their time there
     * we've since started the freshness search from the back since that's where the most fresh arenas end up. results still unclear
+- Implement pointer arithmetic checking
+    - [x] wrap arithmetic at dereference sites
+    - [ ] ensure that only safe pointers escape (call, return, memory, ...)
+- [x] Implement dereference checking
+- [ ] Optimize the placement of the instrumentation
 
 ## Things to fix
-- [ ] We do tagging via wrapping. Public globals that are visible to an external library and returned from there will have a different address than our tagged address
+- [ ] We do global address tagging via wrapping. Public globals that are visible to an external library and returned from there will have a different address than our tagged address
