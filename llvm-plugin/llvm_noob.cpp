@@ -168,9 +168,15 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             // check if the dereferenced pointer is immediately loaded/created, i.e., no arithmetic happened on it
             //  FIXME:: technically the trackedBase might still not contain any arithmetic despite being tracked
             if (checkInfo.shouldCheckArith()) {
-                auto maskInvariantBits = llvm::BinaryOperator::CreateNSWShl(
-                    // FIXME: 512 is only the value for 8-bit tags!
-                    llvm::Constant::getIntegerValue(int64Ty, llvm::APInt{64, static_cast<uint64_t>(-512), true}),
+
+                // maskForInvariantBits = (~0ULL) << (radix + TAG_WIDTH + 1);
+                // (~0ULL << (TAG_WIDTH + 1)) << radix
+                llvm::Value* maskInvariantBits = llvm::ConstantExpr::getShl(
+                    llvm::Constant::getAllOnesValue(int64Ty),
+                    llvm::Constant::getIntegerValue(int64Ty, llvm::APInt{64, TAG_WIDTH + 1})
+                );
+                maskInvariantBits = llvm::BinaryOperator::CreateNSWShl(
+                    maskInvariantBits,
                     radix,
                     "",
                     insertBefore
