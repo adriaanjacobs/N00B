@@ -43,7 +43,9 @@ llvm::Value* BasePtrTracker::trackBasePtr(llvm::Value* ptr) {
             if (!predToCastedTracker.count(pred)) {
                 auto trackerValue = trackBasePtr(phi->getIncomingValueForBlock(pred));
                  // cast to correct type. insert at end of predecessor to ensure it's defined for this phi
-                predToCastedTracker[pred] = llvm::CastInst::CreateBitOrPointerCast(trackerValue, phi->getType(), "", pred->getTerminator());
+                 //     the ifNecessary here avoids stupid issues with invokes where the types are never going to differ
+                 //     but unconditionally inserting a cast instruction makes it hard to choose where to do it
+                predToCastedTracker[pred] = createBitOrPointerCastIfNecessary(trackerValue, phi->getType(), "", pred->getTerminator());
             }
             auto castedTracker = predToCastedTracker[pred];
             trackerPhi->addIncoming(castedTracker, pred);
