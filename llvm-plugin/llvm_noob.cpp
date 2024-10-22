@@ -58,7 +58,8 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             // according to the lowfat guys, the linker will ignore our section attribute for symbols with common linkage
             ASSERT_ELSE_UNKOWN(!global.hasCommonLinkage(), &global);
             unsigned long alignTo = module.getDataLayout().getTypeAllocSize(global.getValueType()).getFixedSize();
-            alignTo = std::max(alignTo, global.getAlign()->value());
+            // enforce a minimum alignment for globals that have no alignment, a too small alignment, a too small size, or a combination
+            alignTo = std::max(alignTo, global.getAlign().hasValue() ? global.getAlign()->value() : 16);
             if (alignTo < 16)
                 alignTo = 16;
             auto radix = std::bit_width(alignTo) - 1;
