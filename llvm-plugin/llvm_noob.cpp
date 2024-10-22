@@ -50,7 +50,6 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
 #if REMAP_GLOBAS
     {
         // first find all the globals we want to wrap, compute their radix, and set the minimum alignment
-        // FIXME: for now, just wrap them all
         // std::map so we get it nice and ordered
         std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> radixToGlobals;
         auto& unsafeAccessInfo = MAM.getResult<UnsafeAccessFinderAnalysis>(module).getOrCreate(false);
@@ -75,6 +74,10 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             if (alignTo < 16)
                 alignTo = 16;
             auto radix = std::bit_width(alignTo) - 1;
+            // fucking sjeng has a 2MB global for fucks sake
+            // that's a 1GB arena, with two reserves around it :(((((
+            // fuck that shit bro
+            ASSERT_ELSE_UNKOWN(radix < 25, &global); // idk why we'd need globals larger than this
             global.setAlignment(llvm::Align{(1ULL << radix)});
             radixToGlobals[radix].push_back(&global);
         }
@@ -92,7 +95,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         std::stringstream sections;
         sections << "\nSECTIONS {\n";
         for (auto& [radix, globals] : radixToGlobals) {
-            assert(radix < 20); // idk why we'd need globals larger than this
+            assert(radix < 25); // idk why we'd need globals larger than this
             if (TAG_WIDTH <= 8)
                 assert(radix >= 4); // otherwise we have to update the linker script to avoid non-page aligned memory regions for TAG_WIDTH=8
             assert(std::popcount(single_arena_size(radix)) == 1);
