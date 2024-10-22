@@ -6,6 +6,7 @@
 #include <llvm-utils/util.h>
 #include <llvm-utils/safetyanalysis/safetyanalysis.h>
 #include <llvm-utils/pointerdetection/pointerdetection.h>
+#include <llvm-utils/addressability/addressability.h>
 
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/InstIterator.h>
@@ -52,7 +53,18 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         // FIXME: for now, just wrap them all
         // std::map so we get it nice and ordered
         std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> radixToGlobals;
+        auto& unsafeAccessInfo = MAM.getResult<UnsafeAccessFinderAnalysis>(module).getOrCreate(false);
+        auto& callSiteAnalysis = MAM.getResult<CallSiteAnalysis>(module);
+        size_t numSafeGlobals = 0;
         for (auto& global : module.globals()) {
+            // globals that cannot flow into unsafeaccesses should be left alone
+            //  this helps deal with opaque/llvm-inserted globals that have special section info etc.
+            //  e.g. @llvm.used
+            if (!ptrMayReachUnsafeAccesses(&global, unsafeAccessInfo, callSiteAnalysis)) {
+                numSafeGlobals++;
+                continue;
+            }
+
             // i dont know what to do with globals that already have a section
             ASSERT_ELSE_UNKOWN(global.getSection() == "", &global);
             // according to the lowfat guys, the linker will ignore our section attribute for symbols with common linkage
@@ -67,9 +79,10 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             radixToGlobals[radix].push_back(&global);
         }
 
-        // print it out for debugging
+        // print it out the global stats
+        llvm::outs() << "We proved " << numSafeGlobals << "/" << module.global_size() << " globals safe. The rest: \n";
         for (auto& [radix, globals] : radixToGlobals) {
-            llvm::outs() << "Radix " << radix << ", " << globals.size() << " globals. Size: " << (1ULL << radix) * globals.size() << "B\n";
+            llvm::outs() << "\tRadix " << radix << ": " << globals.size() << " globals (size: " << (1ULL << radix) * globals.size() << "B)\n";
         }
 
         // then extend the linker script to allocate the appropriate number of sections
@@ -331,7 +344,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         }
 
         if (highestRadix) { // don't do anything if we didnt find a single stack alloc (e.g. specrand)
-            llvm::errs() << "All stack object radices were between " << (int) lowestRadix << " and " << (int) highestRadix << ".\n";
+            llvm::outs() << "All stack object radices were between " << (int) lowestRadix << " and " << (int) highestRadix << ".\n";
 
             // now insert a function to call NOOB's stack allocation function to initialize the stackptr array
             // it will be called from the noob initialization routine
