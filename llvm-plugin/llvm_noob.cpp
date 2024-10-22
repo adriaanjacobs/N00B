@@ -132,6 +132,8 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
 #endif
 
     // now instrument pointer arithmetic and dereferences
+    //  FIXME:: we should do this before the global remapping & stack alloc introduction, 
+    //  because the baseptrtracker will look right through our tag embedding or unsafe stack alloc
     {
         // compute the base pointer of pointer arithmetic, ensure it is always checked
         // we borrow cuCatch's trick to propagate base pointers from source through selects/phis

@@ -16,12 +16,8 @@ llvm::Value* BasePtrTracker::trackBasePtr(llvm::Value* ptr) {
     if (auto it = cachedTrackers.find(base); it != cachedTrackers.end())
         return it->getSecond();
 
-    // base case: we arrived at the baseptr, end the analysis
-    // FIXME: with my alloca & global wrapping, i think there might be others/we might want to end earlier
-    //  maybe i can introduce metadata to see whether it's a noob-introduced pointer?
-    if (llvm::isa<llvm::Argument, llvm::AllocaInst, llvm::CallBase, llvm::Constant, llvm::LoadInst, llvm::ExtractValueInst, llvm::ExtractElementInst>(base)) {
-        return base;
-    } else if (auto phi = llvm::dyn_cast<llvm::PHINode>(base)) {
+    // we only really have to do something special for phis and selects
+    if (auto phi = llvm::dyn_cast<llvm::PHINode>(base)) {
         auto trackerPhi = llvm::PHINode::Create(
             phi->getType(), 
             phi->getNumIncomingValues(), 
@@ -74,5 +70,8 @@ llvm::Value* BasePtrTracker::trackBasePtr(llvm::Value* ptr) {
         trackerSelect->setFalseValue(trackerIfFalse);
 
         return trackerSelect;
-    } else HANDLE_UNKOWN_VALUE(base);
+    } else {
+        // base case: we arrived at the baseptr (typically a load, call, extract*, argument, or something unanalyzable)
+        return base;
+    }
 }
