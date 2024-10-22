@@ -32,12 +32,25 @@ llvm::Value* BasePtrTracker::trackBasePtr(llvm::Value* ptr) {
         //  (that is still under construction)
         cachedTrackers[phi] = trackerPhi;
 
-        for (auto predecessor : llvm::predecessors(phi->getParent())) {
-            auto value = phi->getIncomingValueForBlock(predecessor);
-            auto trackerValue = trackBasePtr(value);
-            // cast to correct type. insert at end of predecessor to ensure it's defined for this phi
-            trackerValue = llvm::CastInst::CreateBitOrPointerCast(trackerValue, phi->getType(), "", predecessor->getTerminator());
-            trackerPhi->addIncoming(trackerValue, predecessor);
+        // i think this one should fail at some point no?
+        ASSERT_ELSE_UNKOWN(llvm::pred_size(phi->getParent()) == phi->getNumIncomingValues(), phi); 
+        ASSERT_ELSE_UNKOWN(phi->getNumIncomingValues() == phi->getNumIncomingValues(), phi);
+
+        // phis contain multiple duplicate entries for different edges from the same predecessor
+        // if we naively find/insert their trackers and cast them to the correct value, we will
+        //  inadvertently create a trackerphi that has different bitcast instructions of the same
+        //  tracker for these duplicate entries
+        // hence, we first deduplicate the phi incoming edges, insert the tracker once for each,
+        //  then duplicate the trackerphi entries as necessary
+        llvm::DenseMap<llvm::BasicBlock*, llvm::Value*> predToCastedTracker;
+        for (auto pred : llvm::predecessors(phi->getParent())) {
+            if (!predToCastedTracker.count(pred)) {
+                auto trackerValue = trackBasePtr(phi->getIncomingValueForBlock(pred));
+                 // cast to correct type. insert at end of predecessor to ensure it's defined for this phi
+                predToCastedTracker[pred] = llvm::CastInst::CreateBitOrPointerCast(trackerValue, phi->getType(), "", pred->getTerminator());
+            }
+            auto castedTracker = predToCastedTracker[pred];
+            trackerPhi->addIncoming(castedTracker, pred);
         }
 
         return trackerPhi;

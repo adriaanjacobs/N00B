@@ -8,7 +8,6 @@
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Analysis/AliasAnalysis.h>
 
-
 int main(int argc, char* argv[]) {
     if (argc != 3) {
         llvm::outs() << "Usage: " << argv[0] << " <IR file> <output file>\n";
