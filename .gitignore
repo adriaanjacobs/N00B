@@ -4,6 +4,7 @@
 !*.cpp
 !*.h
 !*.md
+!noobclang
 
 !allocator/
 !allocator/*
