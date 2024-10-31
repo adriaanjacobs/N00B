@@ -21,8 +21,6 @@
 #include <map>
 #include <functional>
 
-#define NOOB_STACK_SIZE (1ULL * 1024 * 1024)
-
 #define ASSERT_ELSE_PERROR(cond) \
     do {                            \
         bool x = static_cast<bool>(cond);                \

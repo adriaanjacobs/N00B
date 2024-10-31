@@ -291,6 +291,10 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                         auto sizeInBytes = __builtin_align_up(sizeInBits, 8) / 8;
                         auto alignedSizeInBytes = std::bit_ceil(sizeInBytes);
                         alignedSizeInBytes = std::max(alignedSizeInBytes, alloca->getAlign().value()); // if alignment is greater, get it
+                        if (alignedSizeInBytes > NOOB_STACK_SIZE)
+                            llvm::errs() << "alignedSizeInBytes = " << alignedSizeInBytes << "\n";
+                        ASSERT_ELSE_UNKOWN(alignedSizeInBytes <= NOOB_STACK_SIZE, alloca);
+
                         auto radix = std::max(3UL, std::bit_width(alignedSizeInBytes) - 1);
 
                         // keep track of the max and min radix here
