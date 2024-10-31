@@ -40,10 +40,15 @@ done
 echo "Source files: ${source_files[@]}"
 echo "Other args: ${other_args[@]}"
 
+# make sure these do not exist to catch any later errors without reusing stale files
+rm noob.tmp.0.5.precodegen.bc noob_linker_script.ld || true
+
 # First invocation: create the instrumented bitcode with only source files and LTO options
+#   we ignore errors here because we are not linking in all the correct libraries yet
+#   any non-linking errors will be caught by the second command, when 'noob.tmp.0.5.precodegen.bc' doesnt exist
 $clang_command "$@" -flto -fuse-ld=/usr/bin/ld.lld-15 -Xclang -disable-O0-optnone \
         -Xlinker --load-pass-plugin=${NOOB_BUILD_DIR}/llvm-plugin/libllvmnoob.so -Wl,-plugin-opt=no-opaque-pointers \
-        -Wl,-save-temps -o noob.tmp -r
+        -Wl,-save-temps -o noob.tmp || true
 
 # Second invocation: link with libraries and generated linker script, omitting source files
 $clang_command "${other_args[@]}" -fuse-ld=/usr/bin/ld.lld-15 noob.tmp.0.5.precodegen.bc \
