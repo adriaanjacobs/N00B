@@ -8,8 +8,11 @@
 #include <llvm-utils/pointerdetection/pointerdetection.h>
 #include <llvm-utils/addressability/addressability.h>
 
+#include <debugir/DebugIR.h>
+
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/InstIterator.h>
+#include <llvm/IR/DebugInfo.h>
 #include <llvm/Support/FormatVariadic.h>
 #include <llvm/Analysis/StackSafetyAnalysis.h>
 #include <llvm/Support/Process.h>
@@ -376,6 +379,16 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         }
     }
 #endif
+
+    // add IR-level debuginfo
+    {
+        llvm::StripDebugInfo(module); // destroy any existing debug info
+        std::string ltoResultFileName = "LTOresult.unification.ll";
+        dumpModuleToFile(module, ltoResultFileName);
+        char *cwd = get_current_dir_name();
+        auto DisplayM = debugir::createDebugInfo(module, cwd, ltoResultFileName);
+        dumpModuleToFile(*DisplayM, ltoResultFileName);
+    }
 
     // we are lazy and say everything is invalidated
     return llvm::PreservedAnalyses::none();

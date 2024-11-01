@@ -2,6 +2,9 @@ find_package(LLVM 15 REQUIRED CONFIG)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
+set(DEBUGIR_LLVM_VERSION 15)
+add_subdirectory(debugir/)
+
 add_subdirectory(llvm-utils/)
 
 # The below part can be moved into its own subdirectory if you want (I typically do it like that)
@@ -21,7 +24,7 @@ target_include_directories(llvmnoob PUBLIC
     ${LLVM_INCLUDE_DIRS}
     llvm-utils/include/
 )
-target_link_libraries(llvmnoob llvmutils)
+target_link_libraries(llvmnoob llvmutils dbgir)
 
 # an executable that sets up LLVM's pass machinery and runs our pass on a provided bitcode file
 add_executable(run_llvm_noob run_llvm_noob.cpp)
