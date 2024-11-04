@@ -207,11 +207,11 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             //  FIXME:: technically the trackedBase might still not contain any arithmetic despite being tracked
             if (checkInfo.shouldCheckArith()) {
 
-                // maskForInvariantBits = (~0ULL) << (radix + TAG_WIDTH + 1);
-                // (~0ULL << (TAG_WIDTH + 1)) << radix
+                // maskForInvariantBits = (~0ULL) << (radix + TAG_WIDTH);
+                // = (~0ULL << (TAG_WIDTH)) << radix
                 llvm::Value* maskInvariantBits = llvm::ConstantExpr::getShl(
                     llvm::Constant::getAllOnesValue(int64Ty),
-                    llvm::Constant::getIntegerValue(int64Ty, llvm::APInt{64, TAG_WIDTH + 1})
+                    llvm::Constant::getIntegerValue(int64Ty, llvm::APInt{64, TAG_WIDTH})
                 );
                 maskInvariantBits = llvm::BinaryOperator::CreateNSWShl(
                     maskInvariantBits,

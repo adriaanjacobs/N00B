@@ -93,7 +93,6 @@ struct NOOBArena {
     //  they are, by definition, free
     std::bitset<NUM_BLOCKS_IN_ARENA> fresh_status;
     void* base;
-    void* bottom_of_three_base;
     const uint8_t radix;
 
     bool is_full() const {
@@ -118,8 +117,19 @@ struct NOOBArena {
         free_status.flip(); // set all to free
         fresh_status.flip(); // at first, all blocks are fresh
 
-        bottom_of_three_base = mmap_for_arena(radix, single_arena_size(radix), 3*single_arena_size(radix), suggested_location);
-        base = (void*) ((uintptr_t) bottom_of_three_base + single_arena_size(radix));
+        {   // set the first and last cache line of every arena to "allocated"
+            //  this is a poor man's way to ensure arithmetic-capable start/end objects
+            auto num_indices = std::max(1UL, 64UL / (1UL << radix));
+            for (uint i = 0; i < num_indices; i++) {
+                auto complementary_i = free_status.size() - 1 - i;
+                free_status[i] = false;
+                free_status[complementary_i] = false;
+                fresh_status[i] = false;
+                fresh_status[complementary_i] = false;
+            }
+        }
+
+        base = mmap_for_arena(radix, single_arena_size(radix), single_arena_size(radix), suggested_location);
         // get rw access to the actual arena in the middle
         ASSERT_ELSE_PERROR(mprotect(base, single_arena_size(radix), PROT_READ|PROT_WRITE) == 0);
 
@@ -180,7 +190,7 @@ struct NOOBSizeAllocator {
     void* figure_out_a_good_base_suggestion() {
         void* suggested_base = (void*) size_region_base(radix);
         for (auto& [_, arena] : arenas) 
-            suggested_base = (void*) ((uintptr_t) arena.bottom_of_three_base + 3*single_arena_size(radix));
+            suggested_base = (void*) ((uintptr_t) arena.base + single_arena_size(radix));
 
         if (extract_radix((uintptr_t) suggested_base) != radix)
             suggested_base = (void*) size_region_base(radix);
@@ -400,8 +410,7 @@ static void* check_ptr_arithmetic(void* ptr, void* base) {
     auto ptrint = (uintptr_t) ptr;
 
     auto radix = extract_radix(baseint);
-    // + 1 for looser arithmetic bounds
-    auto mask_invariant_bits = (~0ULL << (radix + TAG_WIDTH + 1));
+    auto mask_invariant_bits = (~0ULL << (radix + TAG_WIDTH));
     auto aritharea_base = baseint & mask_invariant_bits;
     auto mask_variant_bits = ~mask_invariant_bits;
     auto masked_ptr = aritharea_base + (ptrint & mask_variant_bits);
