@@ -8,3 +8,5 @@
 #define CHECK_POINTER_ARITHMETIC    1
 #define REPLACE_STACK_ALLOCS        1
 #define REMAP_GLOBAS                1
+
+#define EMIT_RUNTIME_CALLS          0

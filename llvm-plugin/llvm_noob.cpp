@@ -31,6 +31,7 @@ static std::string defaultLinkerScript {
 #endif
 };
 
+[[maybe_unused]]
 static llvm::Value* computeRadix(llvm::Value* ptrAsInt, llvm::Instruction* insertBefore) {
     auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
     auto radix = llvm::BinaryOperator::CreateLShr(
@@ -173,6 +174,8 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         for (auto& access : unsafeAccessInfo.unsafeAccesses) {
             auto ptr = llvm::getLoadStorePointerOperand(access);
             ASSERT_ELSE_UNKOWN(ptr, access);
+            if (auto inst = llvm::dyn_cast<llvm::Instruction>(ptr))
+                inst->setName("ptr");
 #if CHECK_POINTER_ARITHMETIC
             auto trackedBase = basePtrTracker.trackBasePtr(ptr);
 #else
@@ -181,14 +184,21 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             checkInfos.push_back({access, ptr, trackedBase});
         }
 
+        auto& context = module.getContext();
+        auto int64Ty = llvm::Type::getInt64Ty(context);
+        auto int8PtrTy = llvm::Type::getInt8PtrTy(context);
+        auto int8Ty = llvm::Type::getInt8Ty(context);
+        auto noob_access_check_fn = module.getOrInsertFunction("noob_access_check", llvm::Type::getVoidTy(context), int8PtrTy, int8PtrTy);
+
         // now insert an arithmetic & tag check at all dereference sites
         for (auto& checkInfo : checkInfos) {
-            auto& context = module.getContext();
-            auto int64Ty = llvm::Type::getInt64Ty(context);
-            auto int8PtrTy = llvm::Type::getInt8PtrTy(context);
-            auto int8Ty = llvm::Type::getInt8Ty(context);
             auto insertBefore = checkInfo.access;
 
+#if EMIT_RUNTIME_CALLS
+            auto ptrAsInt8Ptr = createBitOrPointerCastIfNecessary(checkInfo.ptrOperand, int8PtrTy, "", insertBefore);
+            auto baseAsInt8Ptr = createBitOrPointerCastIfNecessary(checkInfo.trackedBase, int8PtrTy, "", insertBefore);
+            llvm::CallInst::Create(noob_access_check_fn, {ptrAsInt8Ptr, baseAsInt8Ptr}, "", insertBefore);
+#else
             // compute radix from base! otherwise potentially overwritten in ptr
             auto baseAsInt = llvm::CastInst::CreateBitOrPointerCast(checkInfo.trackedBase, int64Ty, "", insertBefore);
             auto radix = computeRadix(baseAsInt, insertBefore);
@@ -252,6 +262,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                 ASSERT_ELSE_UNKOWN(store, checkInfo.access);
                 store->setOperand(store->getPointerOperandIndex(), checkInfo.ptrOperand);
             }
+#endif
         }
 
         // finally, find all locations where pointers "escape" after having arithmetic applied: 

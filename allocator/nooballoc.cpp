@@ -378,7 +378,9 @@ size_t noob_usable_size(void* ptr) {
     return 1ULL << radix;
 }
 
-extern "C" void noob_allocate_stacks(void** stack_array, uint8_t lowest_radix, uint8_t highest_radix) {
+extern "C" {
+
+void noob_allocate_stacks(void** stack_array, uint8_t lowest_radix, uint8_t highest_radix) {
     fprintf(stderr, "Allocating NOOB stacks between %d and %d...\n", lowest_radix, highest_radix);
     assert(highest_radix >= lowest_radix);
     assert(lowest_radix >= 3 && "We don't map noobstacks for stack objects too small");
@@ -391,4 +393,55 @@ extern "C" void noob_allocate_stacks(void** stack_array, uint8_t lowest_radix, u
         ASSERT_ELSE_PERROR(mprotect(stack, NOOB_STACK_SIZE - 0x1000, PROT_READ|PROT_WRITE) == 0);
         stack_array[radix] = stack;
     }
+}
+
+static void* check_ptr_arithmetic(void* ptr, void* base) {
+    auto baseint = (uintptr_t) base;
+    auto ptrint = (uintptr_t) ptr;
+
+    auto radix = extract_radix(baseint);
+    // + 1 for looser arithmetic bounds
+    auto mask_invariant_bits = (~0ULL << (radix + TAG_WIDTH + 1));
+    auto aritharea_base = baseint & mask_invariant_bits;
+    auto mask_variant_bits = ~mask_invariant_bits;
+    auto masked_ptr = aritharea_base + (ptrint & mask_variant_bits);
+
+    if (ptr != (void*) masked_ptr) {
+        fprintf(stderr, "arena_size: %lu\n", single_arena_size(radix));
+        fprintf(stderr, "ptr: %p\n", ptr);
+        fprintf(stderr, "arena of ptr: %lu\n", arena_idx_in_size_region((uintptr_t) ptr));
+        fprintf(stderr, "base: %p\n", base);
+        fprintf(stderr, "arena of base: %lu\n", arena_idx_in_size_region((uintptr_t) base));
+        fprintf(stderr, "masked_ptr: %p\n", (void*) masked_ptr);
+        fprintf(stderr, "arena of masked_ptr: %lu\n", arena_idx_in_size_region((uintptr_t) masked_ptr));
+    }
+    assert(ptr == (void*) masked_ptr);
+    
+    return (void*) masked_ptr;
+}
+
+void noob_access_check(void* ptr, void* base) {
+    // fprintf(stderr, "noob_access_check(%p, %p)\n", ptr, base);
+#if CHECK_POINTER_ARITHMETIC
+    ptr = check_ptr_arithmetic(ptr, base);
+#endif
+
+#if CHECK_POINTER_DEREFERENCES
+    auto radix = extract_radix((uintptr_t) base);
+    auto embedded_tag = ((uintptr_t) ptr >> radix) & ((1ULL << TAG_WIDTH) - 1);
+    auto top_tag = ((uintptr_t) ptr >> (64 - TAG_WIDTH));
+    if (embedded_tag != top_tag) {
+        // fprintf(stderr, "embedded_tag: %llu\n", embedded_tag);
+        // fprintf(stderr, "top_tag: %lu\n", top_tag);
+    }
+#if TAG_POINTERS
+    // assert(embedded_tag == top_tag); // FIXME: currently still not fully implemented
+#endif
+#endif
+
+    // check if they're accessible
+    auto accessptr = (volatile char*) ptr;
+    *accessptr;
+}
+
 }
