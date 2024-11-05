@@ -68,7 +68,10 @@ BasePtrTracker::BasePtrTrackerInfo BasePtrTracker::trackBasePtr(llvm::Value* ptr
             trackerPhi->addIncoming(castedTracker, pred);
         }
 
-        return {trackerPhi, anyTrackerIsModified};
+        // we've completely analyzed the phi here, update the cache
+        BasePtrTrackerInfo ret{trackerPhi, anyTrackerIsModified};
+        cachedTrackers[phi] = ret;
+        return ret;
     } else if (auto select = llvm::dyn_cast<llvm::SelectInst>(base)) {
         auto trackerSelect = llvm::SelectInst::Create(
             select->getCondition(), 
@@ -97,7 +100,10 @@ BasePtrTracker::BasePtrTrackerInfo BasePtrTracker::trackBasePtr(llvm::Value* ptr
         if (offsetedIfFalse.has_value() && offsetedIfFalse.value() == true)
             anyOperandsModified = true;
 
-        return {trackerSelect, offseted || anyOperandsModified};
+        // we've completely analyzed the select here, update the cache
+        BasePtrTrackerInfo ret{trackerSelect, offseted || anyOperandsModified};
+        cachedTrackers[select] = ret;
+        return ret;
     } else {
         // base case: we arrived at the baseptr (typically a load, call, extract*, argument, or something unanalyzable)
         return {base, offseted};

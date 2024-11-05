@@ -23,9 +23,10 @@
 - Implement pointer arithmetic checking
     - [x] wrap arithmetic at dereference sites
     - [ ] ensure that only safe pointers escape (call, return, memory, ...)
-    - [ ] only emit tracked bases for pointers with arithmetic
+    - [x] only emit tracked bases for pointers with arithmetic
+        * currently, the result of them is unused. perhaps that's enough
 - [x] Implement dereference checking
-- [ ] Optimize the placement of the instrumentation
+- [ ] Optimize the placement of the instrumentation    
 
 ## Things to fix
 - [ ] We do global address tagging via wrapping. Public globals that are visible to an external library and returned from there will have a different address than our tagged address

@@ -171,32 +171,26 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             }
         };
         llvm::SmallVector<CheckInfo> checkInfos;
+        size_t numEscapedArithChecks = 0;
         for (auto& access : unsafeAccessInfo.unsafeAccesses) {
             auto ptr = llvm::getLoadStorePointerOperand(access);
             ASSERT_ELSE_UNKOWN(ptr, access);
             if (auto inst = llvm::dyn_cast<llvm::Instruction>(ptr))
                 inst->setName("ptr");
 #if CHECK_POINTER_ARITHMETIC
-            auto [trackedBase, isOffset] = basePtrTracker.trackBasePtr(ptr);
-            ASSERT_ELSE_UNKOWN(isOffset.has_value(), ptr);
-            if (!isOffset)
+            auto [trackedBase, isOffsetOpt] = basePtrTracker.trackBasePtr(ptr);
+            ASSERT_ELSE_UNKOWN(isOffsetOpt.has_value(), ptr);
+            if (isOffsetOpt.value() == false) {
                 trackedBase = ptr;
-            else {
-                if (ptr == trackedBase) {
-                    llvm::errs() << "access: " << *access << "\n";
-                    dumpModuleToFile(module, "debug.ll");
-                    __builtin_debugtrap();
-                    auto retry = basePtrTracker.trackBasePtr(ptr);
-                    llvm::errs() << "trackedBase: " << *retry.baseTracker << "\n";
-                    llvm::errs() << "isOffset: " << retry.isModified << "\n";
-                }
-                ASSERT_ELSE_UNKOWN(ptr != trackedBase, access); // just a sanity check
-            }
+                numEscapedArithChecks++;
+            } else ASSERT_ELSE_UNKOWN(ptr != trackedBase, access); // just a sanity check
 #else
             auto trackedBase = ptr; // will be detected and not cause arithcheck later
 #endif
             checkInfos.push_back({access, ptr, trackedBase});
         }
+
+        llvm::errs() << numEscapedArithChecks << "/" << checkInfos.size() << " arithmetic checks can be elided.\n";
 
         auto& context = module.getContext();
         auto int64Ty = llvm::Type::getInt64Ty(context);
