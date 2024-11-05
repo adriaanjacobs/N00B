@@ -177,7 +177,21 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             if (auto inst = llvm::dyn_cast<llvm::Instruction>(ptr))
                 inst->setName("ptr");
 #if CHECK_POINTER_ARITHMETIC
-            auto trackedBase = basePtrTracker.trackBasePtr(ptr);
+            auto [trackedBase, isOffset] = basePtrTracker.trackBasePtr(ptr);
+            ASSERT_ELSE_UNKOWN(isOffset.has_value(), ptr);
+            if (!isOffset)
+                trackedBase = ptr;
+            else {
+                if (ptr == trackedBase) {
+                    llvm::errs() << "access: " << *access << "\n";
+                    dumpModuleToFile(module, "debug.ll");
+                    __builtin_debugtrap();
+                    auto retry = basePtrTracker.trackBasePtr(ptr);
+                    llvm::errs() << "trackedBase: " << *retry.baseTracker << "\n";
+                    llvm::errs() << "isOffset: " << retry.isModified << "\n";
+                }
+                ASSERT_ELSE_UNKOWN(ptr != trackedBase, access); // just a sanity check
+            }
 #else
             auto trackedBase = ptr; // will be detected and not cause arithcheck later
 #endif

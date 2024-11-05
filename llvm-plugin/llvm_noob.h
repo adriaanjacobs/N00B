@@ -2,6 +2,8 @@
 
 #include <llvm/IR/PassManager.h>
 
+#include <optional>
+
 //===----------------------------------------------------------------------===//
 /// This class implements an LLVM module transformation pass.
 class NOOBInstrumentationPass : public llvm::PassInfoMixin<NOOBInstrumentationPass> {
@@ -16,11 +18,15 @@ public:
 struct BasePtrTracker {
     llvm::Module& module;
     llvm::ModuleAnalysisManager& MAM;
-    llvm::DenseMap<llvm::Value*, llvm::Value*> cachedTrackers;
+    struct BasePtrTrackerInfo {
+        llvm::Value* baseTracker;
+        std::optional<bool> isModified;
+    };
+    llvm::DenseMap<llvm::Value*, BasePtrTrackerInfo> cachedTrackers;
 
     BasePtrTracker(llvm::Module& module, llvm::ModuleAnalysisManager& MAM);
 
     // propagates intraprocedural base pointers (arguments, loads, calls, ...) through merges (select, phi) 
     // and returns a variable representing the value of the base pointer when `ptr` is live
-    llvm::Value* trackBasePtr(llvm::Value* ptr);
+    BasePtrTrackerInfo trackBasePtr(llvm::Value* ptr);
 };
