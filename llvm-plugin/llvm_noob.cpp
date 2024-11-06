@@ -162,16 +162,23 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         auto& unsafeAccessInfo = MAM.getResult<UnsafeAccessFinderAnalysis>(module).getOrCreate(false);
         BasePtrTracker basePtrTracker{module, MAM};
         struct CheckInfo {
-            llvm::Instruction* const access;
+            llvm::Use* const useToReplace;
+            llvm::Instruction* const insertBefore;
             llvm::Value* ptrOperand;
             llvm::Value* const trackedBase;
+            const bool checkDereference = true;
 
             bool shouldCheckArith() const { 
                 return trackedBase != ptrOperand; 
             }
+
+            bool shouldCheckDereference() const {
+                return checkDereference;
+            }
         };
         llvm::SmallVector<CheckInfo> checkInfos;
         size_t numEscapedArithChecks = 0;
+        size_t totalArithChecks = 0;
         for (auto& access : unsafeAccessInfo.unsafeAccesses) {
             auto ptr = llvm::getLoadStorePointerOperand(access);
             ASSERT_ELSE_UNKOWN(ptr, access);
@@ -187,10 +194,41 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
 #else
             auto trackedBase = ptr; // will be detected and not cause arithcheck later
 #endif
-            checkInfos.push_back({access, ptr, trackedBase});
+            auto ptrOperandIdx = [] (llvm::Instruction* access) {
+                if (auto load = llvm::dyn_cast<llvm::LoadInst>(access))
+                    return load->getPointerOperandIndex();
+                else if (auto store = llvm::dyn_cast<llvm::StoreInst>(access))
+                    return store->getPointerOperandIndex();
+                else HANDLE_UNKOWN_VALUE(access);
+            } (access);
+            checkInfos.push_back({&access->getOperandUse(ptrOperandIdx), access, ptr, trackedBase});
+            totalArithChecks++;
         }
 
-        llvm::errs() << numEscapedArithChecks << "/" << checkInfos.size() << " arithmetic checks can be elided.\n";
+#if CHECK_POINTER_ARITHMETIC
+        // further add pointer escape sites
+        for (auto pointer : pointerInfo.pointers) {
+            llvm::DenseSet<llvm::Use*> escapeSites;
+            collectIntraProceduralPtrEscapes(pointer, escapeSites, pointerInfo);
+
+            for (auto* use : escapeSites) {
+                totalArithChecks++;
+                auto ptr = use->get();
+                auto user = use->getUser();
+                auto [trackedBase, isOffsetOpt] = basePtrTracker.trackBasePtr(ptr);
+                ASSERT_ELSE_UNKOWN(isOffsetOpt.has_value(), ptr);
+                if (isOffsetOpt.value() == true) {
+                    ASSERT_ELSE_UNKOWN(ptr != trackedBase, user);
+                    // there's no way the user can be anything but an instruction here; 
+                    //  otherwise it'd be a severely OOB compile-time constant (??)
+                    ASSERT_ELSE_UNKOWN(llvm::isa<llvm::Instruction>(user), user);
+                    checkInfos.push_back({use, llvm::cast<llvm::Instruction>(user), ptr, trackedBase, false});
+                } else numEscapedArithChecks++;
+            }
+        }
+#endif
+
+        llvm::errs() << numEscapedArithChecks << "/" << totalArithChecks << " arithmetic checks can be elided.\n";
 
         auto& context = module.getContext();
         auto int64Ty = llvm::Type::getInt64Ty(context);
@@ -200,7 +238,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
 
         // now insert an arithmetic & tag check at all dereference sites
         for (auto& checkInfo : checkInfos) {
-            auto insertBefore = checkInfo.access;
+            auto insertBefore = checkInfo.insertBefore;
 
 #if EMIT_RUNTIME_CALLS
             auto ptrAsInt8Ptr = createBitOrPointerCastIfNecessary(checkInfo.ptrOperand, int8PtrTy, "", insertBefore);
@@ -214,7 +252,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             // check if the dereferenced pointer is immediately loaded/created, i.e., no arithmetic happened on it
             //  FIXME:: technically the trackedBase might still not contain any arithmetic despite being tracked
             if (checkInfo.shouldCheckArith()) {
-
+                assert(CHECK_POINTER_ARITHMETIC);
                 // maskForInvariantBits = (~0ULL) << (radix + TAG_WIDTH);
                 // = (~0ULL << (TAG_WIDTH)) << radix
                 llvm::Value* maskInvariantBits = llvm::ConstantExpr::getShl(
@@ -248,7 +286,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
 
             // now instrument all pointer dereferences to verify that the top bits match the in-pointer bits
 #if CHECK_POINTER_DEREFERENCES
-            {
+            if (checkInfo.shouldCheckDereference()) {
                 auto ptr = checkInfo.ptrOperand;            
                 auto ptrAsInt = new llvm::PtrToIntInst(ptr, int64Ty, "", insertBefore);
 
@@ -262,14 +300,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                 checkInfo.ptrOperand = maskedPtr;
             }
 #endif
-
-            if (auto load = llvm::dyn_cast<llvm::LoadInst>(checkInfo.access))
-                load->setOperand(load->getPointerOperandIndex(), checkInfo.ptrOperand);
-            else {
-                auto store = llvm::cast<llvm::StoreInst>(checkInfo.access);
-                ASSERT_ELSE_UNKOWN(store, checkInfo.access);
-                store->setOperand(store->getPointerOperandIndex(), checkInfo.ptrOperand);
-            }
+            checkInfo.useToReplace->set(checkInfo.ptrOperand);
 #endif
         }
 
