@@ -208,6 +208,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
 #if CHECK_POINTER_ARITHMETIC
         // further add pointer escape sites
         for (auto pointer : pointerInfo.pointers) {
+            ASSERT_ELSE_UNKOWN(pointerInfo.is_confirmed_pointer(pointer), pointer);
             llvm::DenseSet<llvm::Use*> escapeSites;
             collectIntraProceduralPtrEscapes(pointer, escapeSites, pointerInfo);
 
