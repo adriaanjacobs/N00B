@@ -27,6 +27,7 @@
         * currently, the result of them is unused. perhaps that's enough
 - [x] Implement dereference checking
 - [ ] Optimize the placement of the instrumentation    
+- [ ] Support ranged memory access checks 
 
 ## Things to fix
 - [ ] We do global address tagging via wrapping. Public globals that are visible to an external library and returned from there will have a different address than our tagged address

@@ -7,6 +7,7 @@
 #include <llvm-utils/safetyanalysis/safetyanalysis.h>
 #include <llvm-utils/pointerdetection/pointerdetection.h>
 #include <llvm-utils/addressability/addressability.h>
+#include <llvm-utils/instrpointoptimization/hoistloopmemaccesses.h>
 
 #include <debugir/DebugIR.h>
 
@@ -160,76 +161,118 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         //  this is implemented in "BasePtrTracker" and modifies the module
         auto& pointerInfo = MAM.getResult<PointerDetectionAnalysis>(module);
         auto& unsafeAccessInfo = MAM.getResult<UnsafeAccessFinderAnalysis>(module).getOrCreate(false);
-        BasePtrTracker basePtrTracker{module, MAM};
-        struct CheckInfo {
-            llvm::Use* const useToReplace;
-            llvm::Instruction* const insertBefore;
-            llvm::Value* ptrOperand;
-            llvm::Value* const trackedBase;
-            const bool checkDereference = true;
 
-            bool shouldCheckArith() const { 
-                return trackedBase != ptrOperand; 
+        struct CheckInfo {
+            InstrumentationPoint point;
+            llvm::Value* trackedBase;
+            const bool checkDereference;
+
+            CheckInfo(const InstrumentationPoint& point, llvm::Value* trackedBase, const bool checkDereference) : 
+                point{point}, trackedBase{trackedBase}, checkDereference{checkDereference}
+            {}
+
+            bool shouldCheckArith () const {
+                return trackedBase == point.pointerOperand;
             }
 
             bool shouldCheckDereference() const {
                 return checkDereference;
             }
         };
-        llvm::SmallVector<CheckInfo> checkInfos;
-        size_t numEscapedArithChecks = 0;
-        size_t totalArithChecks = 0;
-        for (auto& access : unsafeAccessInfo.unsafeAccesses) {
-            auto ptr = llvm::getLoadStorePointerOperand(access);
-            ASSERT_ELSE_UNKOWN(ptr, access);
-            if (auto inst = llvm::dyn_cast<llvm::Instruction>(ptr))
-                inst->setName("ptr");
-#if CHECK_POINTER_ARITHMETIC
-            auto [trackedBase, isOffsetOpt] = basePtrTracker.trackBasePtr(ptr);
-            ASSERT_ELSE_UNKOWN(isOffsetOpt.has_value(), ptr);
-            if (isOffsetOpt.value() == false) {
-                trackedBase = ptr;
-                numEscapedArithChecks++;
-            } else ASSERT_ELSE_UNKOWN(ptr != trackedBase, access); // just a sanity check
-#else
-            auto trackedBase = ptr; // will be detected and not cause arithcheck later
-#endif
-            auto ptrOperandIdx = [] (llvm::Instruction* access) {
-                if (auto load = llvm::dyn_cast<llvm::LoadInst>(access))
-                    return load->getPointerOperandIndex();
-                else if (auto store = llvm::dyn_cast<llvm::StoreInst>(access))
-                    return store->getPointerOperandIndex();
-                else HANDLE_UNKOWN_VALUE(access);
-            } (access);
-            checkInfos.push_back({&access->getOperandUse(ptrOperandIdx), access, ptr, trackedBase});
-            totalArithChecks++;
-        }
+        llvm::DenseMap<llvm::Use* /* memaccess */, CheckInfo> replaceUseToCheckInfos;
+        {
+            // we're going to optimize the placement of checks in two waves: once for arithmetic checks & once for dereference checks
+            //  this is because the hoisting code assumes that all checks can cancel each other out
+            LoopHoister loopHoister{module, MAM};
+            llvm::DenseMap<llvm::Function*, llvm::DenseMap<llvm::Use*, llvm::DenseSet<InstrumentationPoint*>>> funcToCheckPoints;
 
-#if CHECK_POINTER_ARITHMETIC
-        // further add pointer escape sites
-        for (auto pointer : pointerInfo.pointers) {
-            ASSERT_ELSE_UNKOWN(pointerInfo.is_confirmed_pointer(pointer), pointer);
-            llvm::DenseSet<llvm::Use*> escapeSites;
-            collectIntraProceduralPtrEscapes(pointer, escapeSites, pointerInfo);
-
-            for (auto* use : escapeSites) {
-                totalArithChecks++;
-                auto ptr = use->get();
-                auto user = use->getUser();
-                auto [trackedBase, isOffsetOpt] = basePtrTracker.trackBasePtr(ptr);
-                ASSERT_ELSE_UNKOWN(isOffsetOpt.has_value(), ptr);
-                if (isOffsetOpt.value() == true) {
-                    ASSERT_ELSE_UNKOWN(ptr != trackedBase, user);
-                    // there's no way the user can be anything but an instruction here; 
-                    //  otherwise it'd be a severely OOB compile-time constant (??)
-                    ASSERT_ELSE_UNKOWN(llvm::isa<llvm::Instruction>(user), user);
-                    checkInfos.push_back({use, llvm::cast<llvm::Instruction>(user), ptr, trackedBase, false});
-                } else numEscapedArithChecks++;
+            for (auto& access : unsafeAccessInfo.unsafeAccesses) {
+                auto ptr = llvm::getLoadStorePointerOperand(access);
+                ASSERT_ELSE_UNKOWN(ptr, access);
+                if (auto inst = llvm::dyn_cast<llvm::Instruction>(ptr))
+                    inst->setName("unsafeptr");
+                auto ptrOperandIdx = [] (llvm::Instruction* access) {
+                    if (auto load = llvm::dyn_cast<llvm::LoadInst>(access))
+                        return load->getPointerOperandIndex();
+                    else if (auto store = llvm::dyn_cast<llvm::StoreInst>(access))
+                        return store->getPointerOperandIndex();
+                    else HANDLE_UNKOWN_VALUE(access);
+                } (access);
+                auto& ptrUse = access->getOperandUse(ptrOperandIdx);
+                funcToCheckPoints[access->getFunction()][&ptrUse].insert(new InstrumentationPoint(access, ptrUse.get()));
             }
-        }
+            loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints);
+
+            // parse the results into CheckInfos
+            for (auto& [func, instpoints] : funcToCheckPoints)
+                for (auto& [memaccessUse, points] : instpoints)
+                    for (auto& point : points) {
+                        ASSERT_ELSE_UNKOWN(!replaceUseToCheckInfos.count(memaccessUse), memaccessUse->getUser());
+                        bool dbg = replaceUseToCheckInfos.try_emplace(memaccessUse, *point, point->pointerOperand, CHECK_POINTER_DEREFERENCES).second;
+                        assert(dbg);
+                    }
+
+#if CHECK_POINTER_ARITHMETIC
+            // add escape sites too
+            for (auto& pointer : pointerInfo.pointers) {
+                ASSERT_ELSE_UNKOWN(pointerInfo.is_confirmed_pointer(pointer), pointer);
+                llvm::DenseSet<llvm::Use*> escapeSites;
+                collectIntraProceduralPtrEscapes(pointer, escapeSites, pointerInfo);
+
+                for (auto* use : escapeSites) {
+                    auto user = use->getUser();
+                    // the user is always an instruction here!! (otherwise we're doing an unsafe but constant escape??)
+                    auto userInst = llvm::dyn_cast<llvm::Instruction>(user);
+                    ASSERT_ELSE_UNKOWN(userInst, user);
+                    funcToCheckPoints[userInst->getFunction()][use].insert(new InstrumentationPoint(userInst, use->get()));
+                }
+            }
+#endif
+            // then optimize the list _again_. the loophoister will share expanded SCEVs for both i think
+            //  the advantage is that this will eliminate dominated arithmetic checks and such
+            loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints);
+
+            // parse these into checkinfos. simultaneously insert the baseptrtrackers
+            BasePtrTracker basePtrTracker{module, MAM};
+            size_t numEscapedArithChecks = 0;
+            size_t totalArithChecks = 0;
+
+            for (auto& [func, instpoints] : funcToCheckPoints) {
+                for (auto& [memaccessUse, points] : instpoints) {
+                    for (auto& point : points) {
+                        // FIXME:: our current instrumentation does not support range checks!
+                        if (point->isRangeCheck())
+                            continue;
+
+#if CHECK_POINTER_ARITHMETIC
+                        totalArithChecks++;
+                        auto [trackedBase, isOffsetOpt] = basePtrTracker.trackBasePtr(point->pointerOperand);
+                        ASSERT_ELSE_UNKOWN(isOffsetOpt.has_value(), point->pointerOperand);
+                        if (isOffsetOpt.value() == true) 
+                            ASSERT_ELSE_UNKOWN(point->pointerOperand != trackedBase, memaccessUse->getUser());
+                        else 
+                            numEscapedArithChecks++;
+#else
+                        trackedBase = point.pointerOperand;
 #endif
 
-        llvm::errs() << numEscapedArithChecks << "/" << totalArithChecks << " arithmetic checks can be elided.\n";
+                        if (auto pointIt = replaceUseToCheckInfos.find(memaccessUse); pointIt != replaceUseToCheckInfos.end()) {
+                            ASSERT_ELSE_UNKOWN(pointIt->getSecond().point == *point, memaccessUse->getUser());
+                            assert(!pointIt->getSecond().shouldCheckArith());
+                            pointIt->getSecond().trackedBase = trackedBase;
+                        } else {
+                            // a pure arithmetic check; not a dereference checking site
+                            bool dbg = replaceUseToCheckInfos.try_emplace(memaccessUse, *point, trackedBase, false).second;
+                            assert(dbg);
+                        }
+                    }
+                }
+            }
+
+#if CHECK_POINTER_ARITHMETIC
+            llvm::errs() << numEscapedArithChecks << "/" << totalArithChecks << " arithmetic checks can be elided.\n";
+#endif
+        }
 
         auto& context = module.getContext();
         auto int64Ty = llvm::Type::getInt64Ty(context);
@@ -238,11 +281,11 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         auto noob_access_check_fn = module.getOrInsertFunction("noob_access_check", llvm::Type::getVoidTy(context), int8PtrTy, int8PtrTy);
 
         // now insert an arithmetic & tag check at all dereference sites
-        for (auto& checkInfo : checkInfos) {
-            auto insertBefore = checkInfo.insertBefore;
+        for (auto& [useToReplace, checkInfo] : replaceUseToCheckInfos) {
+            auto insertBefore = checkInfo.point.insertBefore;
 
 #if EMIT_RUNTIME_CALLS
-            auto ptrAsInt8Ptr = createBitOrPointerCastIfNecessary(checkInfo.ptrOperand, int8PtrTy, "", insertBefore);
+            auto ptrAsInt8Ptr = createBitOrPointerCastIfNecessary(checkInfo.point.pointerOperand, int8PtrTy, "", insertBefore);
             auto baseAsInt8Ptr = createBitOrPointerCastIfNecessary(checkInfo.trackedBase, int8PtrTy, "", insertBefore);
             llvm::CallInst::Create(noob_access_check_fn, {ptrAsInt8Ptr, baseAsInt8Ptr}, "", insertBefore);
 #else
@@ -268,7 +311,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                 );
                 auto arithAreaBase = llvm::BinaryOperator::CreateAnd(maskInvariantBits, baseAsInt, "", insertBefore);
                 
-                auto ptrAsInt = llvm::CastInst::CreateBitOrPointerCast(checkInfo.ptrOperand, int64Ty, "", insertBefore);
+                auto ptrAsInt = llvm::CastInst::CreateBitOrPointerCast(checkInfo.point.pointerOperand, int64Ty, "", insertBefore);
                 auto maskVariantBits = llvm::BinaryOperator::CreateXor(
                     maskInvariantBits, 
                     llvm::Constant::getIntegerValue(int64Ty, llvm::APInt{64, static_cast<uint64_t>(-1), true}), 
@@ -280,15 +323,15 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                 auto diffWithBase = llvm::BinaryOperator::CreateSub(safePtrAsInt, baseAsInt, "", insertBefore);
                 auto baseAsInt8Ptr = llvm::CastInst::CreateBitOrPointerCast(checkInfo.trackedBase, int8PtrTy, "", insertBefore);
                 llvm::Instruction* provenancedSafePtr = llvm::GetElementPtrInst::Create(int8Ty, baseAsInt8Ptr, {diffWithBase}, "", insertBefore);
-                provenancedSafePtr = llvm::CastInst::CreateBitOrPointerCast(provenancedSafePtr, checkInfo.ptrOperand->getType(), "", insertBefore);
+                provenancedSafePtr = llvm::CastInst::CreateBitOrPointerCast(provenancedSafePtr, checkInfo.point.pointerOperand->getType(), "", insertBefore);
 
-                checkInfo.ptrOperand = provenancedSafePtr;
+                checkInfo.point.pointerOperand = provenancedSafePtr;
             }
 
             // now instrument all pointer dereferences to verify that the top bits match the in-pointer bits
-#if CHECK_POINTER_DEREFERENCES
             if (checkInfo.shouldCheckDereference()) {
-                auto ptr = checkInfo.ptrOperand;            
+                assert(CHECK_POINTER_DEREFERENCES);
+                auto ptr = checkInfo.point.pointerOperand;            
                 auto ptrAsInt = new llvm::PtrToIntInst(ptr, int64Ty, "", insertBefore);
 
                 // compute the mask to XOR with based on the lowest TAG_WIDTH bits of the base pointer
@@ -298,18 +341,11 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                 // xor the pointer and replace the access ptroperand
                 auto maskedPtrAsInt = llvm::BinaryOperator::CreateXor(ptrAsInt, invariantBitMask, "", insertBefore);
                 auto maskedPtr= new llvm::IntToPtrInst(maskedPtrAsInt, ptr->getType(), "", insertBefore);
-                checkInfo.ptrOperand = maskedPtr;
+                checkInfo.point.pointerOperand = maskedPtr;
             }
-#endif
-            checkInfo.useToReplace->set(checkInfo.ptrOperand);
+            useToReplace->set(checkInfo.point.pointerOperand);
 #endif
         }
-
-        // finally, find all locations where pointers "escape" after having arithmetic applied: 
-        //  e.g., to external code, stored to memory, returned from function, etc.
-        // only match pointers that have not been checked by the dereference yet!
-        //  but _do_ match pointers that could have code paths from source on which they are not checked
-        // place an additional check there
     }
 
 #if REPLACE_STACK_ALLOCS
