@@ -163,28 +163,29 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         auto& unsafeAccessInfo = MAM.getResult<UnsafeAccessFinderAnalysis>(module).getOrCreate(false);
 
         struct CheckInfo {
-            InstrumentationPoint point;
+            InstrumentationPoint* point;
+            InstrumentationPoint __debug_copy = *point;
             llvm::Value* trackedBase;
             const bool checkDereference;
 
-            CheckInfo(const InstrumentationPoint& point, llvm::Value* trackedBase, const bool checkDereference) : 
+            CheckInfo(InstrumentationPoint* point, llvm::Value* trackedBase, const bool checkDereference) : 
                 point{point}, trackedBase{trackedBase}, checkDereference{checkDereference}
             {}
 
             bool shouldCheckArith () const {
-                return trackedBase == point.pointerOperand;
+                return trackedBase != point->pointerOperand;
             }
 
             bool shouldCheckDereference() const {
                 return checkDereference;
             }
         };
-        llvm::DenseMap<llvm::Use* /* memaccess */, CheckInfo> replaceUseToCheckInfos;
-        {
+        llvm::DenseMap<llvm::Use* /* memaccess */, CheckInfo> replaceUseToCheckInfo;
+        { 
             // we're going to optimize the placement of checks in two waves: once for arithmetic checks & once for dereference checks
             //  this is because the hoisting code assumes that all checks can cancel each other out
             LoopHoister loopHoister{module, MAM};
-            llvm::DenseMap<llvm::Function*, llvm::DenseMap<llvm::Use*, llvm::DenseSet<InstrumentationPoint*>>> funcToCheckPoints;
+            llvm::DenseMap<llvm::Function*, llvm::DenseMap<llvm::Use*, InstrumentationPoint*>> funcToCheckPoints;
 
             for (auto& access : unsafeAccessInfo.unsafeAccesses) {
                 auto ptr = llvm::getLoadStorePointerOperand(access);
@@ -199,18 +200,19 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                     else HANDLE_UNKOWN_VALUE(access);
                 } (access);
                 auto& ptrUse = access->getOperandUse(ptrOperandIdx);
-                funcToCheckPoints[access->getFunction()][&ptrUse].insert(new InstrumentationPoint(access, ptrUse.get()));
+                // this use shouldnt exist yet
+                ASSERT_ELSE_UNKOWN(!funcToCheckPoints[access->getFunction()].count(&ptrUse), access);
+                funcToCheckPoints[access->getFunction()][&ptrUse] = new InstrumentationPoint(access, ptrUse.get());
             }
             loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints);
 
             // parse the results into CheckInfos
             for (auto& [func, instpoints] : funcToCheckPoints)
-                for (auto& [memaccessUse, points] : instpoints)
-                    for (auto& point : points) {
-                        ASSERT_ELSE_UNKOWN(!replaceUseToCheckInfos.count(memaccessUse), memaccessUse->getUser());
-                        bool dbg = replaceUseToCheckInfos.try_emplace(memaccessUse, *point, point->pointerOperand, CHECK_POINTER_DEREFERENCES).second;
-                        assert(dbg);
-                    }
+                for (auto& [memaccessUse, point] : instpoints) {
+                    ASSERT_ELSE_UNKOWN(!replaceUseToCheckInfo.count(memaccessUse), memaccessUse->getUser());
+                    bool dbg = replaceUseToCheckInfo.try_emplace(memaccessUse, point, point->pointerOperand, CHECK_POINTER_DEREFERENCES).second;
+                    assert(dbg);
+                }
 
 #if CHECK_POINTER_ARITHMETIC
             // add escape sites too
@@ -224,55 +226,58 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                     // the user is always an instruction here!! (otherwise we're doing an unsafe but constant escape??)
                     auto userInst = llvm::dyn_cast<llvm::Instruction>(user);
                     ASSERT_ELSE_UNKOWN(userInst, user);
-                    funcToCheckPoints[userInst->getFunction()][use].insert(new InstrumentationPoint(userInst, use->get()));
+                    // this use shouldnt exist yet
+                    ASSERT_ELSE_UNKOWN(!funcToCheckPoints[userInst->getFunction()].count(use), user);
+                    funcToCheckPoints[userInst->getFunction()][use] = new InstrumentationPoint(userInst, use->get());
                 }
             }
 #endif
+
             // then optimize the list _again_. the loophoister will share expanded SCEVs for both i think
             //  the advantage is that this will eliminate dominated arithmetic checks and such
             loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints);
 
-            // parse these into checkinfos. simultaneously insert the baseptrtrackers
-            BasePtrTracker basePtrTracker{module, MAM};
-            size_t numEscapedArithChecks = 0;
-            size_t totalArithChecks = 0;
-
-            for (auto& [func, instpoints] : funcToCheckPoints) {
-                for (auto& [memaccessUse, points] : instpoints) {
-                    for (auto& point : points) {
-                        // FIXME:: our current instrumentation does not support range checks!
-                        if (point->isRangeCheck())
-                            continue;
-
-#if CHECK_POINTER_ARITHMETIC
-                        totalArithChecks++;
-                        auto [trackedBase, isOffsetOpt] = basePtrTracker.trackBasePtr(point->pointerOperand);
-                        ASSERT_ELSE_UNKOWN(isOffsetOpt.has_value(), point->pointerOperand);
-                        if (isOffsetOpt.value() == true) 
-                            ASSERT_ELSE_UNKOWN(point->pointerOperand != trackedBase, memaccessUse->getUser());
-                        else 
-                            numEscapedArithChecks++;
-#else
-                        trackedBase = point.pointerOperand;
-#endif
-
-                        if (auto pointIt = replaceUseToCheckInfos.find(memaccessUse); pointIt != replaceUseToCheckInfos.end()) {
-                            ASSERT_ELSE_UNKOWN(pointIt->getSecond().point == *point, memaccessUse->getUser());
-                            assert(!pointIt->getSecond().shouldCheckArith());
-                            pointIt->getSecond().trackedBase = trackedBase;
-                        } else {
-                            // a pure arithmetic check; not a dereference checking site
-                            bool dbg = replaceUseToCheckInfos.try_emplace(memaccessUse, *point, trackedBase, false).second;
-                            assert(dbg);
-                        }
-                    }
-                }
+            { // sanitize: check that this second hoisting step did not modify any of the points we care about
+                for (auto& [_, checkInfo] : replaceUseToCheckInfo)
+                    assert(*checkInfo.point == checkInfo.__debug_copy);
             }
 
+            // parse these into checkinfos. simultaneously insert the baseptrtrackers
+            BasePtrTracker basePtrTracker{module, MAM};
+
+            for (auto& [func, instpoints] : funcToCheckPoints) {
+                for (auto& [memaccessUse, point] : instpoints) {
+                    // FIXME:: our current instrumentation does not support range checks!
+                    if (point->isRangeCheck())
+                        continue;
+
 #if CHECK_POINTER_ARITHMETIC
-            llvm::errs() << numEscapedArithChecks << "/" << totalArithChecks << " arithmetic checks can be elided.\n";
+                    auto [trackedBase, isOffsetOpt] = basePtrTracker.trackBasePtr(point->pointerOperand);
+                    ASSERT_ELSE_UNKOWN(isOffsetOpt.has_value(), point->pointerOperand);
+                    if (isOffsetOpt.value() == true) 
+                        ASSERT_ELSE_UNKOWN(point->pointerOperand != trackedBase, memaccessUse->getUser());
+#else
+                    trackedBase = point.pointerOperand;
 #endif
+
+                    if (auto pointIt = replaceUseToCheckInfo.find(memaccessUse); pointIt != replaceUseToCheckInfo.end()) {
+                        auto existingPoint = pointIt->getSecond().point;
+                        ASSERT_ELSE_UNKOWN(existingPoint == point, memaccessUse->getUser());
+                        if (pointIt->getSecond().shouldCheckArith()) // we already describe this use with a previous arith point
+                            assert(pointIt->getSecond().trackedBase == trackedBase); // should equal due to baseptrtracker caching
+                        pointIt->getSecond().trackedBase = trackedBase;
+                    } else {
+                        // a pure arithmetic check; not a dereference checking site
+                        bool dbg = replaceUseToCheckInfo.try_emplace(memaccessUse, point, trackedBase, false).second;
+                        assert(dbg);
+                    }
+                }   
+            }
         }
+
+        // now we'll actually modify the program to insert the checks and update the usesToReplace
+        //  keep in mind here that multiple uses can use the same instrumentation
+        //  invert the checkinfo map here to ensure we only insert instrumentation once per instpoint
 
         auto& context = module.getContext();
         auto int64Ty = llvm::Type::getInt64Ty(context);
@@ -281,8 +286,8 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         auto noob_access_check_fn = module.getOrInsertFunction("noob_access_check", llvm::Type::getVoidTy(context), int8PtrTy, int8PtrTy);
 
         // now insert an arithmetic & tag check at all dereference sites
-        for (auto& [useToReplace, checkInfo] : replaceUseToCheckInfos) {
-            auto insertBefore = checkInfo.point.insertBefore;
+        for (auto& [useToReplace, checkInfo] : replaceUseToCheckInfo) {
+            auto insertBefore = checkInfo.point->insertBefore;
 
 #if EMIT_RUNTIME_CALLS
             auto ptrAsInt8Ptr = createBitOrPointerCastIfNecessary(checkInfo.point.pointerOperand, int8PtrTy, "", insertBefore);
@@ -311,7 +316,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                 );
                 auto arithAreaBase = llvm::BinaryOperator::CreateAnd(maskInvariantBits, baseAsInt, "", insertBefore);
                 
-                auto ptrAsInt = llvm::CastInst::CreateBitOrPointerCast(checkInfo.point.pointerOperand, int64Ty, "", insertBefore);
+                auto ptrAsInt = llvm::CastInst::CreateBitOrPointerCast(checkInfo.point->pointerOperand, int64Ty, "", insertBefore);
                 auto maskVariantBits = llvm::BinaryOperator::CreateXor(
                     maskInvariantBits, 
                     llvm::Constant::getIntegerValue(int64Ty, llvm::APInt{64, static_cast<uint64_t>(-1), true}), 
@@ -323,15 +328,15 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                 auto diffWithBase = llvm::BinaryOperator::CreateSub(safePtrAsInt, baseAsInt, "", insertBefore);
                 auto baseAsInt8Ptr = llvm::CastInst::CreateBitOrPointerCast(checkInfo.trackedBase, int8PtrTy, "", insertBefore);
                 llvm::Instruction* provenancedSafePtr = llvm::GetElementPtrInst::Create(int8Ty, baseAsInt8Ptr, {diffWithBase}, "", insertBefore);
-                provenancedSafePtr = llvm::CastInst::CreateBitOrPointerCast(provenancedSafePtr, checkInfo.point.pointerOperand->getType(), "", insertBefore);
+                provenancedSafePtr = llvm::CastInst::CreateBitOrPointerCast(provenancedSafePtr, checkInfo.point->pointerOperand->getType(), "", insertBefore);
 
-                checkInfo.point.pointerOperand = provenancedSafePtr;
+                checkInfo.point->pointerOperand = provenancedSafePtr;
             }
 
             // now instrument all pointer dereferences to verify that the top bits match the in-pointer bits
             if (checkInfo.shouldCheckDereference()) {
                 assert(CHECK_POINTER_DEREFERENCES);
-                auto ptr = checkInfo.point.pointerOperand;            
+                auto ptr = checkInfo.point->pointerOperand;            
                 auto ptrAsInt = new llvm::PtrToIntInst(ptr, int64Ty, "", insertBefore);
 
                 // compute the mask to XOR with based on the lowest TAG_WIDTH bits of the base pointer
@@ -341,11 +346,11 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                 // xor the pointer and replace the access ptroperand
                 auto maskedPtrAsInt = llvm::BinaryOperator::CreateXor(ptrAsInt, invariantBitMask, "", insertBefore);
                 auto maskedPtr= new llvm::IntToPtrInst(maskedPtrAsInt, ptr->getType(), "", insertBefore);
-                checkInfo.point.pointerOperand = maskedPtr;
+                checkInfo.point->pointerOperand = maskedPtr;
             }
-            useToReplace->set(checkInfo.point.pointerOperand);
-#endif
+            useToReplace->set(checkInfo.point->pointerOperand);
         }
+#endif
     }
 
 #if REPLACE_STACK_ALLOCS
