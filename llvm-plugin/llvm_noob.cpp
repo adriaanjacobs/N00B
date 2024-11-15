@@ -189,7 +189,6 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         {
             // we're going to optimize the placement of checks in two waves: once for arithmetic checks & once for dereference checks
             //  this is because the hoisting code assumes that all checks can cancel each other out
-            LoopHoister loopHoister{module, MAM};
             llvm::DenseMap<llvm::Function*, llvm::DenseMap<llvm::Use*, InstrumentationPoint*>> funcToCheckPoints;
             // keep track of all created checkinfos to ensure that the loop hoisting code isnt creating any new ones
             //  those would not have the correct checkinfo subtype and later downcasts would be unsafe
@@ -220,6 +219,8 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                 funcToCheckPoints[access->getFunction()][&ptrUse] = newCheckInfo;
                 dbg_checkInfos.insert(newCheckInfo);
             }
+
+            LoopHoister loopHoister{module, MAM};
             loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints);
 
             // keep track of the checkinfos that describe dereferences

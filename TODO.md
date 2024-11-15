@@ -5,7 +5,7 @@
 - [x] Support `realloc`
 - Wrap & tag globals
     - [x] Generate a linker script on the fly
-    - [ ] Do not wrap "safe" globals (I guess). Not sure if this really matters
+    - [x] Do not wrap "safe" globals (I guess). Not sure if this really matters
     - [ ] Put read-only globals in read-only sections
 - Relocate and check stack allocations
     - Create stack allocator
@@ -22,11 +22,11 @@
     * we've since started the freshness search from the back since that's where the most fresh arenas end up. results still unclear
 - Implement pointer arithmetic checking
     - [x] wrap arithmetic at dereference sites
-    - [ ] ensure that only safe pointers escape (call, return, memory, ...)
+    - [x] ensure that only safe pointers escape (call, return, memory, ...)
     - [x] only emit tracked bases for pointers with arithmetic
         * currently, the result of them is unused. perhaps that's enough
 - [x] Implement dereference checking
-- [ ] Optimize the placement of the instrumentation    
+- [x] Optimize the placement of the instrumentation    
 - [ ] Support ranged memory access checks 
 
 ## Things to fix

@@ -22,7 +22,6 @@ target_compile_options(llvmnoob PUBLIC
 # target_link_options(llvmnoob PUBLIC -fsanitize=address)
 target_include_directories(llvmnoob PUBLIC 
     ${LLVM_INCLUDE_DIRS}
-    llvm-utils/include/
 )
 target_link_libraries(llvmnoob llvmutils dbgir)
 
