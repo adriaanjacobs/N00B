@@ -331,7 +331,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             auto insertBefore = checkInfo->insertBefore;
 
 #if EMIT_RUNTIME_CALLS
-            auto ptrAsInt8Ptr = createBitOrPointerCastIfNecessary(checkInfo->point.pointerOperand, int8PtrTy, "", insertBefore);
+            auto ptrAsInt8Ptr = createBitOrPointerCastIfNecessary(checkInfo->pointerOperand, int8PtrTy, "", insertBefore);
             auto baseAsInt8Ptr = createBitOrPointerCastIfNecessary(checkInfo->trackedBase, int8PtrTy, "", insertBefore);
             llvm::CallInst::Create(noob_access_check_fn, {ptrAsInt8Ptr, baseAsInt8Ptr}, "", insertBefore);
 #else
@@ -398,6 +398,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                 auto castedPtr = createBitOrPointerCastIfNecessary(checkInfo->pointerOperand, useToReplace->get()->getType(), "", llvm::cast<llvm::Instruction>(useToReplace->getUser()));
                 useToReplace->set(castedPtr);
             }
+#endif
         }
 
 #if ARITH_CHECK_BRANCH 
@@ -405,8 +406,6 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             llvm::AlwaysInlinerPass alwaysInliner;
             alwaysInliner.run(module, MAM);
         }
-#endif
-
 #endif
     }
 
@@ -553,5 +552,4 @@ void NOOBInstrumentationPass::addPasses(llvm::ModulePassManager& MPM) {
     MPM.addPass(NOOBInstrumentationPass{});
     MPM.addPass(llvm::VerifierPass{});
     IsInBoundsAnalysis::addCleanupPasses(MPM);
-    IsInBoundsAnalysis::addPassesAround<NOOBInstrumentationPass>(MPM);
 }
