@@ -13,6 +13,9 @@ public:
 
     // Transform the bitcode/IR in the given LLVM module.
     llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM);
+
+    static void registerAnalyses(llvm::ModuleAnalysisManager&);
+    static void addPasses(llvm::ModulePassManager&);
 };
 
 struct BasePtrTracker {

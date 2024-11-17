@@ -1,7 +1,5 @@
 #include "llvm_noob.h"
 
-#include <llvm-utils/safetyanalysis/safetyanalysis.h>
-
 #include <llvm/Passes/PassPlugin.h>
 #include <llvm/Passes/PassBuilder.h>
 
@@ -12,9 +10,9 @@ extern "C" ::llvm::PassPluginLibraryInfo LLVM_ATTRIBUTE_WEAK llvmGetPassPluginIn
         [](llvm::PassBuilder &PB) {
             PB.registerFullLinkTimeOptimizationLastEPCallback([](llvm::ModulePassManager &MPM, llvm::OptimizationLevel Level) {
                 llvm::outs() << "Registering NOOB pass for LateLTO!\n";
-                IsInBoundsAnalysis::addPassesAround<NOOBInstrumentationPass>(MPM);
+                NOOBInstrumentationPass::addPasses(MPM);
             });
-            PB.registerAnalysisRegistrationCallback(MemAccessInstrumentator::registerAnalyses);
+            PB.registerAnalysisRegistrationCallback(NOOBInstrumentationPass::registerAnalyses);
         }
     };
 }

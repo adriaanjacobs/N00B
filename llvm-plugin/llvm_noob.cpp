@@ -517,3 +517,15 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
     return llvm::PreservedAnalyses::none();
 }
 
+
+void NOOBInstrumentationPass::registerAnalyses(llvm::ModuleAnalysisManager& MAM) {
+    MemAccessInstrumentator::registerAnalyses(MAM);
+}
+
+void NOOBInstrumentationPass::addPasses(llvm::ModulePassManager& MPM) {
+    IsInBoundsAnalysis::addPreparationPasses(MPM);
+    MPM.addPass(NOOBInstrumentationPass{});
+    MPM.addPass(llvm::VerifierPass{});
+    IsInBoundsAnalysis::addCleanupPasses(MPM);
+    IsInBoundsAnalysis::addPassesAround<NOOBInstrumentationPass>(MPM);
+}
