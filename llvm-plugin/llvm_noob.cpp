@@ -16,7 +16,8 @@
 #include <llvm/IR/DebugInfo.h>
 #include <llvm/Support/FormatVariadic.h>
 #include <llvm/Analysis/StackSafetyAnalysis.h>
-#include <llvm/Support/Process.h>
+#include <llvm/Transforms/IPO/AlwaysInliner.h>
+#include <llvm/Transforms/Utils/BasicBlockUtils.h>
 
 #include <sstream>
 
@@ -306,7 +307,21 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         auto int8PtrTy = llvm::Type::getInt8PtrTy(context);
         auto int8Ty = llvm::Type::getInt8Ty(context);
         auto noob_access_check_fn = module.getOrInsertFunction("noob_access_check", llvm::Type::getVoidTy(context), int8PtrTy, int8PtrTy);
+#if ARITH_CHECK_BRANCH
+        auto noob_assert_arithcheck_fn = module.getOrInsertFunction("noob_assert_arithcheck", llvm::Type::getVoidTy(context), int64Ty, int64Ty);
+        { // populate the arithmetic checking function
+            auto func = llvm::cast<llvm::Function>(noob_assert_arithcheck_fn.getCallee());
+            auto entry = llvm::BasicBlock::Create(context, "entry", func);
+            auto ret = llvm::ReturnInst::Create(context, entry);
 
+            auto cmp = new llvm::ICmpInst(ret, llvm::ICmpInst::ICMP_NE, func->getArg(0), func->getArg(1));
+            auto thenBlockTerm = llvm::SplitBlockAndInsertIfThen(cmp, ret, true);
+            assert(thenBlockTerm != ret);
+
+            auto abort_fn = module.getOrInsertFunction("abort", llvm::Type::getVoidTy(context));
+            auto callAbort = llvm::CallInst::Create(abort_fn, "", thenBlockTerm);
+        }
+#endif
         // now insert an arithmetic & tag check at all dereference sites
         for (auto& [checkInfo, usesToReplace] : checkInfoToUses) {
             // FIXME: we dont support range checking yet. we would currently not correctly replace the uses
@@ -351,12 +366,15 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                 );
                 auto inArithAreaOffset = llvm::BinaryOperator::CreateAnd(maskVariantBits, ptrAsInt, "", insertBefore);
                 auto safePtrAsInt = llvm::BinaryOperator::CreateAdd(arithAreaBase, inArithAreaOffset, "", insertBefore);
+#if ARITH_CHECK_BRANCH
+                auto callCheckArith = llvm::CallInst::Create(noob_assert_arithcheck_fn, {ptrAsInt, safePtrAsInt}, "", insertBefore);
+#else
                 auto diffWithBase = llvm::BinaryOperator::CreateSub(safePtrAsInt, baseAsInt, "", insertBefore);
                 auto baseAsInt8Ptr = llvm::CastInst::CreateBitOrPointerCast(checkInfo->trackedBase, int8PtrTy, "", insertBefore);
                 llvm::Instruction* provenancedSafePtr = llvm::GetElementPtrInst::Create(int8Ty, baseAsInt8Ptr, {diffWithBase}, "", insertBefore);
                 provenancedSafePtr = llvm::CastInst::CreateBitOrPointerCast(provenancedSafePtr, checkInfo->pointerOperand->getType(), "", insertBefore);
-
                 checkInfo->pointerOperand = provenancedSafePtr;
+#endif
             }
 
             // now instrument all pointer dereferences to verify that the top bits match the in-pointer bits
@@ -381,6 +399,14 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                 useToReplace->set(castedPtr);
             }
         }
+
+#if ARITH_CHECK_BRANCH 
+        { // inline the arithcheck functions
+            llvm::AlwaysInlinerPass alwaysInliner;
+            alwaysInliner.run(module, MAM);
+        }
+#endif
+
 #endif
     }
 

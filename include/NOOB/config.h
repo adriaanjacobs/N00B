@@ -6,6 +6,7 @@
 #define TAG_POINTERS                1
 #define CHECK_POINTER_DEREFERENCES  1
 #define CHECK_POINTER_ARITHMETIC    1
+#define ARITH_CHECK_BRANCH          (0 && CHECK_POINTER_ARITHMETIC)
 #define REPLACE_STACK_ALLOCS        1
 #define REMAP_GLOBAS                1
 
