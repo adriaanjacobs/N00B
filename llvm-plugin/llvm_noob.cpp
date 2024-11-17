@@ -376,8 +376,10 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             }
 
             // now replace all uses that are checked by this pointeroperand
-            for (auto useToReplace : usesToReplace)
-                useToReplace->set(checkInfo->pointerOperand);
+            for (auto useToReplace : usesToReplace) {
+                auto castedPtr = createBitOrPointerCastIfNecessary(checkInfo->pointerOperand, useToReplace->get()->getType(), "", llvm::cast<llvm::Instruction>(useToReplace->getUser()));
+                useToReplace->set(castedPtr);
+            }
         }
 #endif
     }
