@@ -227,10 +227,15 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             // keep track of the checkinfos that describe dereferences
             //  this is because they may be deleted (not modified, we check this later) by the next round of optimizations
             //  this is because the next round of optimizations includes new instrumentation points that may dominate
-            //  or otherwise make redundant existing arithmetic checks. the dereference checks should be unaffected            
+            //  or otherwise make redundant existing arithmetic checks. the dereference checks should be unaffected
+            // also use this loop to update the trackedBase for any pointerOperand that may have been modified by loopOpts
+            //  this can happen for range checks, especially confusing for single-iteration range checks!
             for (auto& [func, instpoints] : funcToCheckPoints)
-                for (auto& [memaccessUse, point] : instpoints) 
-                    checkInfoToUses[safeDownCast(point)].insert(memaccessUse);
+                for (auto& [memaccessUse, point] : instpoints) {
+                    auto checkInfo = safeDownCast(point);
+                    checkInfo->trackedBase = checkInfo->pointerOperand;
+                    checkInfoToUses[checkInfo].insert(memaccessUse);
+                }
 
             // add escape sites too
             for (auto& pointer : pointerInfo.pointers) {
@@ -289,8 +294,11 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                     ASSERT_ELSE_UNKOWN(isOffsetOpt.has_value(), checkInfo->pointerOperand);
                     if (isOffsetOpt.value() == true) 
                         ASSERT_ELSE_UNKOWN(checkInfo->pointerOperand != trackedBase, memaccessUse->getUser());
-                    checkInfo->trackedBase = trackedBase;
+#else
+                    // important to set because loopopt might have modified the pointerOperand
+                    auto trackedBase = checkInfo->pointerOperand; 
 #endif
+                    checkInfo->trackedBase = trackedBase;
                     
                     // add the escape sites to the uses of this instpoint
                     checkInfoToUses[checkInfo].insert(memaccessUse);
@@ -306,8 +314,8 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         auto int64Ty = llvm::Type::getInt64Ty(context);
         auto int8PtrTy = llvm::Type::getInt8PtrTy(context);
         auto int8Ty = llvm::Type::getInt8Ty(context);
-        auto noob_access_check_fn = module.getOrInsertFunction("noob_access_check", llvm::Type::getVoidTy(context), int8PtrTy, int8PtrTy);
 #if ARITH_CHECK_BRANCH
+        auto noob_access_check_fn = module.getOrInsertFunction("noob_access_check", llvm::Type::getVoidTy(context), int8PtrTy, int8PtrTy);
         auto noob_assert_arithcheck_fn = module.getOrInsertFunction("noob_assert_arithcheck", llvm::Type::getVoidTy(context), int64Ty, int64Ty);
         { // populate the arithmetic checking function
             auto func = llvm::cast<llvm::Function>(noob_assert_arithcheck_fn.getCallee());
@@ -340,9 +348,8 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             auto radix = computeRadix(baseAsInt, insertBefore);
 
             // check if the dereferenced pointer is immediately loaded/created, i.e., no arithmetic happened on it
-            //  FIXME:: technically the trackedBase might still not contain any arithmetic despite being tracked
             if (checkInfo->shouldCheckArith()) {
-                assert(CHECK_POINTER_ARITHMETIC);
+                ASSERT_ELSE_UNKOWN(CHECK_POINTER_ARITHMETIC, checkInfo->trackedBase);
                 // maskForInvariantBits = (~0ULL) << (radix + TAG_WIDTH);
                 // = (~0ULL << (TAG_WIDTH)) << radix
                 llvm::Value* maskInvariantBits = llvm::ConstantExpr::getShl(
