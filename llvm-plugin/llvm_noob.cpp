@@ -53,12 +53,14 @@ static llvm::Value* computeRadix(llvm::Value* ptrAsInt, llvm::Instruction* inser
 
 llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm::ModuleAnalysisManager& MAM) {
 
+    auto& unsafeAccessInfo = MAM.getResult<UnsafeAccessFinderAnalysis>(module).getOrCreate(false);
+    MAM.getCachedResult<IsInBoundsAnalysis>(module)->printBailStats();
+
 #if REMAP_GLOBAS
     {
         // first find all the globals we want to wrap, compute their radix, and set the minimum alignment
         // std::map so we get it nice and ordered
         std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> radixToGlobals;
-        auto& unsafeAccessInfo = MAM.getResult<UnsafeAccessFinderAnalysis>(module).getOrCreate(false);
         auto& callSiteAnalysis = MAM.getResult<CallSiteAnalysis>(module);
         size_t numSafeGlobals = 0;
         for (auto& global : module.globals()) {
@@ -161,7 +163,6 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         // we borrow cuCatch's trick to propagate base pointers from source through selects/phis
         //  this is implemented in "BasePtrTracker" and modifies the module
         auto& pointerInfo = MAM.getResult<PointerDetectionAnalysis>(module);
-        auto& unsafeAccessInfo = MAM.getResult<UnsafeAccessFinderAnalysis>(module).getOrCreate(false);
 
         struct CheckInfo : public InstrumentationPoint {
             llvm::Value* trackedBase = pointerOperand;
@@ -237,12 +238,15 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
                     checkInfoToUses[checkInfo].insert(memaccessUse);
                 }
 
-            // add escape sites too
+            auto& isInBoundsAnalysis = MAM.getResult<IsInBoundsAnalysis>(module);
+            // add escape sites too, only for unsafe pointers
             for (auto& pointer : pointerInfo.pointers) {
                 ASSERT_ELSE_UNKOWN(pointerInfo.is_confirmed_pointer(pointer), pointer);
+                if (isInBoundsAnalysis.isInBounds(pointer))
+                    continue;
+
                 llvm::DenseSet<llvm::Use*> escapeSites;
                 collectIntraProceduralPtrEscapes(pointer, escapeSites, pointerInfo);
-
                 for (auto* use : escapeSites) {
                     auto user = use->getUser();
                     // the user is always an instruction here!! (otherwise we're doing an unsafe but constant escape??)
@@ -538,7 +542,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
     // add IR-level debuginfo
     {
         llvm::StripDebugInfo(module); // destroy any existing debug info
-        std::string ltoResultFileName = "LTOresult.unification.ll";
+        std::string ltoResultFileName = "LTOresult.noob.ll";
         dumpModuleToFile(module, ltoResultFileName);
         char *cwd = get_current_dir_name();
         auto DisplayM = debugir::createDebugInfo(module, cwd, ltoResultFileName);
