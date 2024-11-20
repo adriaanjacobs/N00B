@@ -354,11 +354,11 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             // check if the dereferenced pointer is immediately loaded/created, i.e., no arithmetic happened on it
             if (checkInfo->shouldCheckArith()) {
                 ASSERT_ELSE_UNKOWN(CHECK_POINTER_ARITHMETIC, checkInfo->trackedBase);
-                // maskForInvariantBits = (~0ULL) << (radix + TAG_WIDTH);
-                // = (~0ULL << (TAG_WIDTH)) << radix
+                // maskForInvariantBits = (~0ULL) << (radix + TAG_WIDTH + ARITH_LEEWAY_WIDTH);
+                // = (~0ULL << (TAG_WIDTH + ARITH_LEEWAY_WIDTH)) << radix
                 llvm::Value* maskInvariantBits = llvm::ConstantExpr::getShl(
                     llvm::Constant::getAllOnesValue(int64Ty),
-                    llvm::Constant::getIntegerValue(int64Ty, llvm::APInt{64, TAG_WIDTH})
+                    llvm::Constant::getIntegerValue(int64Ty, llvm::APInt{64, TAG_WIDTH + ARITH_LEEWAY_WIDTH})
                 );
                 maskInvariantBits = llvm::BinaryOperator::CreateNSWShl(
                     maskInvariantBits,

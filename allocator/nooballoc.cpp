@@ -410,7 +410,7 @@ static void* check_ptr_arithmetic(void* ptr, void* base) {
     auto ptrint = (uintptr_t) ptr;
 
     auto radix = extract_radix(baseint);
-    auto mask_invariant_bits = (~0ULL << (radix + TAG_WIDTH));
+    auto mask_invariant_bits = (~0ULL << (radix + TAG_WIDTH + ARITH_LEEWAY_WIDTH));
     auto aritharea_base = baseint & mask_invariant_bits;
     auto mask_variant_bits = ~mask_invariant_bits;
     auto masked_ptr = aritharea_base + (ptrint & mask_variant_bits);

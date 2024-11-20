@@ -1,4 +1,5 @@
 set(TAG_WIDTH                   8)
+set(ARITH_LEEWAY_WIDTH          0)
 set(NOOB_STACK_SIZE             0x400000ULL) # bzip2 needs large objects on the stack!
 
 set(TAG_POINTERS                1)
