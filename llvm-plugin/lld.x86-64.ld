@@ -40,8 +40,8 @@ PHDRS {
 }
 
 SECTIONS {
-  PROVIDE (__executable_start = SEGMENT_START("text-segment", 0x200000));
-  . = SEGMENT_START("text-segment", 0x200000) + SIZEOF_HEADERS;
+  PROVIDE (__executable_start = SEGMENT_START("text-segment", ${NOOB_COMPAT_MIN_ADDR}));
+  . = SEGMENT_START("text-segment", ${NOOB_COMPAT_MIN_ADDR}) + SIZEOF_HEADERS;
 
   .interp         : { *(.interp) } :interp :brol
 

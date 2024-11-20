@@ -11,7 +11,7 @@ elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
 else()
     message(FATAL_ERROR "Unsupported architecture: ${CMAKE_SYSTEM_PROCESSOR}")
 endif()
-#   generate the linker script. 
+#   generate the linker script. It will automatically fill in the relevant variables
 configure_file(
     ${LINKER_SCRIPT}
     ${CMAKE_BINARY_DIR}/linker_script/noob_linker_script.ld

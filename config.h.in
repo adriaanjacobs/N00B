@@ -3,6 +3,7 @@
 #define TAG_WIDTH                   (${TAG_WIDTH})
 #define ARITH_LEEWAY_WIDTH          (${ARITH_LEEWAY_WIDTH})
 #define NOOB_STACK_SIZE             (${NOOB_STACK_SIZE})
+#define NOOB_COMPAT_MIN_ADDR        (${NOOB_COMPAT_MIN_ADDR})
 
 #define TAG_POINTERS                ${TAG_POINTERS}
 #define CHECK_POINTER_DEREFERENCES  ${CHECK_POINTER_DEREFERENCES}

@@ -21,8 +21,8 @@
 
 #include <sstream>
 
-// LLD doesnt have a default linker script, and, hence, does not support the script syntax to "extend" it
-//  but Ruben wrote one for us that we can extend dynamically
+// generated linker script based on target arch & noob config
+//  we extend this dynamically with global sections & segments
 static std::string defaultLinkerScript {
 #include "noob_linker_script.ld"
 };
@@ -50,7 +50,6 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
     auto& unsafeAccessInfo = MAM.getResult<UnsafeAccessFinderAnalysis>(module).getOrCreate(false);
     MAM.getCachedResult<IsInBoundsAnalysis>(module)->printBailStats();
 
-#if REMAP_GLOBAS
     {
         // first find all the globals we want to wrap, compute their radix, and set the minimum alignment
         // std::map so we get it nice and ordered
@@ -90,6 +89,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             llvm::outs() << "\tRadix " << radix << ": " << globals.size() << " globals (size: " << (1ULL << radix) * globals.size() << "B)\n";
         }
 
+#if REMAP_GLOBALS
         // then extend the linker script to allocate the appropriate number of sections
         // The plan is to generate a custom linker script, save it to `noob_linker_script.ld`, and then have the user specify that filename
         //  on the command line as the -T parameter during linking. 
@@ -141,13 +141,13 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         sections << "}\n";
 
         defaultLinkerScript.append(sections.str());
+#endif
 
         std::error_code ec;
         llvm::raw_fd_ostream linkerScript{"noob_linker_script.ld", ec};
         assert(ec.value() == 0);
         linkerScript << defaultLinkerScript;
     }
-#endif
 
     // now instrument pointer arithmetic and dereferences
     //  FIXME:: we should do this before the global remapping & stack alloc introduction, 
