@@ -6,6 +6,9 @@
 !*.md
 !noobclang
 !noobclang++
+!*.cmake
+!*.in
+
 
 !allocator/
 !allocator/*

@@ -6,6 +6,15 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# include NOOB configuration variables
+include("${CMAKE_SOURCE_DIR}/noobconfig.cmake")
+
+# generate config.h include file
+configure_file(
+    ${CMAKE_SOURCE_DIR}/config.h.in
+    ${CMAKE_BINARY_DIR}/include/NOOB/config.h
+)
+include_directories(${CMAKE_BINARY_DIR}/include/)
 include_directories(include)
 
 add_subdirectory(llvm-plugin)

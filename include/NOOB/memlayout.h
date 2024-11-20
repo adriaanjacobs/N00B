@@ -1,6 +1,6 @@
 #pragma once
 
-#include "config.h"
+#include <NOOB/config.h>
 
 #include <stdint.h>
 #include <unistd.h>
