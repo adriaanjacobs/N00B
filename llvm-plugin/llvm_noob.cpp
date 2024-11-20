@@ -24,13 +24,7 @@
 // LLD doesnt have a default linker script, and, hence, does not support the script syntax to "extend" it
 //  but Ruben wrote one for us that we can extend dynamically
 static std::string defaultLinkerScript {
-#if defined(__aarch64__)
-#include "lld.AArch64.ld"
-#elif defined(__x86_64__)
-#include "lld.x86-64.ld"
-#else
-#error Target arch not recognized!
-#endif
+#include "noob_linker_script.ld"
 };
 
 [[maybe_unused]]

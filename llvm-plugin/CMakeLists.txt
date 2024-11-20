@@ -2,6 +2,21 @@ find_package(LLVM 15 REQUIRED CONFIG)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
+# generate the noob linker script for the appropriate architecture
+#   check the target arch
+if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+    set(LINKER_SCRIPT lld.x86-64.ld)
+elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+    set(LINKER_SCRIPT lld.AArch64.ld)
+else()
+    message(FATAL_ERROR "Unsupported architecture: ${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+#   generate the linker script. 
+configure_file(
+    ${LINKER_SCRIPT}
+    ${CMAKE_BINARY_DIR}/linker_script/noob_linker_script.ld
+)
+
 set(DEBUGIR_LLVM_VERSION 15)
 add_subdirectory(debugir/)
 
@@ -22,6 +37,7 @@ target_compile_options(llvmnoob PUBLIC
 # target_link_options(llvmnoob PUBLIC -fsanitize=address)
 target_include_directories(llvmnoob PUBLIC 
     ${LLVM_INCLUDE_DIRS}
+    ${CMAKE_BINARY_DIR}/linker_script/
 )
 target_link_libraries(llvmnoob llvmutils dbgir)
 
