@@ -411,22 +411,19 @@ static void* check_ptr_arithmetic(void* ptr, void* base) {
 
     auto radix = extract_radix(baseint);
     auto mask_invariant_bits = (~0ULL << (radix + TAG_WIDTH + ARITH_LEEWAY_WIDTH));
+    auto arith_area_size = ~mask_invariant_bits;
     auto aritharea_base = baseint & mask_invariant_bits;
-    auto mask_variant_bits = ~mask_invariant_bits;
-    auto masked_ptr = aritharea_base + (ptrint & mask_variant_bits);
-
-    if (ptr != (void*) masked_ptr) {
-        fprintf(stderr, "arena_size: %lu\n", single_arena_size(radix));
+    auto offset = ptrint - aritharea_base;
+    if (offset >= arith_area_size) {
+        fprintf(stderr, "\n\nOut of bounds arithmetic detected!!\n");
         fprintf(stderr, "ptr: %p\n", ptr);
-        fprintf(stderr, "arena of ptr: %lu\n", arena_idx_in_size_region((uintptr_t) ptr));
         fprintf(stderr, "base: %p\n", base);
-        fprintf(stderr, "arena of base: %lu\n", arena_idx_in_size_region((uintptr_t) base));
-        fprintf(stderr, "masked_ptr: %p\n", (void*) masked_ptr);
-        fprintf(stderr, "arena of masked_ptr: %lu\n", arena_idx_in_size_region((uintptr_t) masked_ptr));
+        fprintf(stderr, "aritharea of base is [%p, %p[ (size: %llu)\n", (void*) aritharea_base, (void*) (aritharea_base + arith_area_size), arith_area_size);
+        fprintf(stderr, "offset of ptr in aritharea is %ld\n", static_cast<intptr_t>(offset));
     }
-    assert(ptr == (void*) masked_ptr);
+    assert(offset < arith_area_size);
     
-    return (void*) masked_ptr;
+    return ptr;
 }
 
 void noob_access_check(void* ptr, void* base) {
