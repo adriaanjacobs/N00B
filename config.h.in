@@ -2,6 +2,9 @@
 
 #define TAG_WIDTH                   (${TAG_WIDTH})
 #define ARITH_LEEWAY_WIDTH          (${ARITH_LEEWAY_WIDTH})
+static_assert(ARITH_LEEWAY_WIDTH == 0, "we don't need to permit additional arithmetic");
+#define ARITH_LEEWAY_OCCUPIED_BITS  (${ARITH_LEEWAY_OCCUPIED_BITS})
+static_assert(ARITH_LEEWAY_OCCUPIED_BITS < (1U << ARITH_LEEWAY_WIDTH));
 #define NOOB_STACK_SIZE             (${NOOB_STACK_SIZE})
 #define NOOB_COMPAT_MIN_ADDR        (${NOOB_COMPAT_MIN_ADDR})
 
