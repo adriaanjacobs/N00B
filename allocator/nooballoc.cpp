@@ -76,7 +76,11 @@ static void* mmap_arena_aritharea(uint8_t in_pointer_radix, size_t aritharea_siz
     assert(aritharea_size % 2 == 0);
     assert(__builtin_is_aligned(suggested_location, aritharea_size));
     assert(size_region_size() % aritharea_size == 0);
-    assert(aritharea_size % single_arena_size(in_pointer_radix) == 0);
+    if (aritharea_size > single_arena_size(in_pointer_radix))
+        assert(aritharea_size % single_arena_size(in_pointer_radix) == 0);
+    else
+        assert(single_arena_size(in_pointer_radix) % aritharea_size == 0);
+    auto align_to = std::max(aritharea_size, single_arena_size(in_pointer_radix));
 
     // round-robin try out all the possibilities
     auto aloc = (uintptr_t) suggested_location;
@@ -88,7 +92,7 @@ static void* mmap_arena_aritharea(uint8_t in_pointer_radix, size_t aritharea_siz
         ASSERT_ELSE_PERROR(errno == EEXIST);
 
         // increment & mask
-        aloc += aritharea_size;
+        aloc += align_to;
         aloc = size_region_base(in_pointer_radix) + ((aloc - size_region_base(in_pointer_radix)) % size_region_size());
         
         // if we've gone all the way around, then we couldn't find any possible mapping
@@ -97,6 +101,7 @@ static void* mmap_arena_aritharea(uint8_t in_pointer_radix, size_t aritharea_siz
     // we've found one at aloc
     assert((void*) aloc != MAP_FAILED);
     assert(aloc % aritharea_size == 0);
+    assert(aloc % single_arena_size(in_pointer_radix) == 0);
     return (void*) aloc;
 }
 
