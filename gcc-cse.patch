@@ -1,0 +1,135 @@
+diff --git a/cse.c b/cse.c
+index 65f4542..c4ed4fa 100755
+--- a/cse.c
++++ b/cse.c
+@@ -77,11 +77,12 @@ Registers and "quantity numbers":
+    `reg_qty' records what quantity a register is currently thought
+    of as containing.
+ 
+-   All real quantity numbers are greater than or equal to `max_reg'.
+-   If register N has not been assigned a quantity, reg_qty[N] will equal N.
++   All real quantity numbers are greater than or equal to zero.
++   If register N has not been assigned a quantity, reg_qty[N] will
++   equal -N - 1, which is always negative.
+ 
+-   Quantity numbers below `max_reg' do not exist and none of the `qty_table'
+-   entries should be referenced with an index below `max_reg'.
++   Quantity numbers below zero do not exist and none of the `qty_table'
++   entries should be referenced with a negative index.
+ 
+    We also maintain a bidirectional chain of registers for each
+    quantity number.  The `qty_table` members `first_reg' and `last_reg',
+@@ -520,7 +521,7 @@ struct table_elt
+ /* Determine if the quantity number for register X represents a valid index
+    into the qty_table.  */
+ 
+-#define REGNO_QTY_VALID_P(N) (REG_QTY (N) != (int) (N))
++#define REGNO_QTY_VALID_P(N) (REG_QTY (N) >= 0)
+ 
+ static struct table_elt *table[HASH_SIZE];
+ 
+@@ -963,7 +964,7 @@ get_cse_reg_info (regno)
+       /* Initialize it.  */
+       p->reg_tick = 1;
+       p->reg_in_table = -1;
+-      p->reg_qty = regno;
++      p->reg_qty = -regno - 1;
+       p->regno = regno;
+       p->next = cse_reg_info_used_list;
+       cse_reg_info_used_list = p;
+@@ -987,7 +988,7 @@ new_basic_block ()
+ {
+   int i;
+ 
+-  next_qty = max_reg;
++  next_qty = 0;
+ 
+   /* Clear out hash table state for this pass.  */
+ 
+@@ -1138,7 +1139,7 @@ delete_reg_equiv (reg)
+   int p, n;
+ 
+   /* If invalid, do nothing.  */
+-  if (q == (int) reg)
++  if (! REGNO_QTY_VALID_P (reg))
+     return;
+ 
+   ent = &qty_table[q];
+@@ -1155,7 +1156,7 @@ delete_reg_equiv (reg)
+   else
+     ent->first_reg = n;
+ 
+-  REG_QTY (reg) = reg;
++  REG_QTY (reg) = -reg - 1;
+ }
+ 
+ /* Remove any invalid expressions from the hash table
+@@ -1765,6 +1766,7 @@ merge_equiv_classes (class1, class2)
+       /* Remove old entry, make a new one in CLASS1's class.
+ 	 Don't do this for invalid entries as we cannot find their
+ 	 hash code (it also isn't necessary).  */
++	 
+       if (GET_CODE (exp) == REG || exp_equiv_p (exp, exp, 1, 0))
+ 	{
+ 	  hash_arg_in_memory = 0;
+@@ -7135,8 +7137,6 @@ cse_main (f, nregs, after_loop, file)
+       if (max_qty < 500)
+ 	max_qty = 500;
+ 
+-      max_qty += max_reg;
+-
+       /* If this basic block is being extended by following certain jumps,
+          (see `cse_end_of_basic_block'), we reprocess the code from the start.
+          Otherwise, we start after this basic block.  */
+@@ -7199,13 +7199,8 @@ cse_basic_block (from, to, next_branch, around_loop)
+   rtx libcall_insn = NULL_RTX;
+   int num_insns = 0;
+ 
+-  /* This array is undefined before max_reg, so only allocate
+-     the space actually needed and adjust the start.  */
+-
+-  qty_table
+-    = (struct qty_table_elem *) xmalloc ((max_qty - max_reg)
+-					 * sizeof (struct qty_table_elem));
+-  qty_table -= max_reg;
++  /* Allocate the space needed by qty_table.  */
++  qty_table = xmalloc (max_qty * sizeof (struct qty_table_elem));
+ 
+   new_basic_block ();
+ 
+@@ -7301,7 +7296,7 @@ cse_basic_block (from, to, next_branch, around_loop)
+ 	{
+ 	  if (to == 0)
+ 	    {
+-	      free (qty_table + max_reg);
++	      free (qty_table);
+ 	      return 0;
+ 	    }
+ 
+@@ -7336,7 +7331,7 @@ cse_basic_block (from, to, next_branch, around_loop)
+ 	  /* If TO was the last insn in the function, we are done.  */
+ 	  if (insn == 0)
+ 	    {
+-	      free (qty_table + max_reg);
++	      free (qty_table);
+ 	      return 0;
+ 	    }
+ 
+@@ -7345,7 +7340,7 @@ cse_basic_block (from, to, next_branch, around_loop)
+ 	  prev = prev_nonnote_insn (to);
+ 	  if (prev && GET_CODE (prev) == BARRIER)
+ 	    {
+-	      free (qty_table + max_reg);
++	      free (qty_table);
+ 	      return insn;
+ 	    }
+ 
+@@ -7393,7 +7388,7 @@ cse_basic_block (from, to, next_branch, around_loop)
+       && LABEL_NUSES (JUMP_LABEL (insn)) == 1)
+     cse_around_loop (JUMP_LABEL (insn));
+ 
+-  free (qty_table + max_reg);
++  free (qty_table);
+ 
+   return to ? NEXT_INSN (to) : 0;
+ }

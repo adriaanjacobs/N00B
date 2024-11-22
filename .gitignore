@@ -8,18 +8,17 @@
 !noobclang++
 !*.cmake
 !*.in
+!*.patch
 
 
 !allocator/
-!allocator/*
+!allocator/**/
 
 !include/
-!include/*
-!include/**
+!include/**/
 
 !llvm-plugin/
-!llvm-plugin/*
+!llvm-plugin/**/
 
 !test/
-!test/*
-!test/**
+!test/**/
