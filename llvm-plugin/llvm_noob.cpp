@@ -236,7 +236,8 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             // add escape sites too, only for unsafe pointers
             for (auto& pointer : pointerInfo.pointers) {
                 ASSERT_ELSE_UNKOWN(pointerInfo.is_confirmed_pointer(pointer), pointer);
-                if (isInBoundsAnalysis.isInBounds(pointer))
+                // do not wrap escaping constant pointers (obviously) or pointers that are in bounds
+                if (llvm::isa<llvm::Constant>(pointer) || isInBoundsAnalysis.isInBounds(pointer))
                     continue;
 
                 llvm::DenseSet<llvm::Use*> escapeSites;
