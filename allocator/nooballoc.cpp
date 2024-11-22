@@ -45,6 +45,15 @@ struct run_on_destruct {
 #define UNIQUE_VAR_NAME CONCAT(_unique_var_, __COUNTER__)
 #define defer(block) run_on_destruct UNIQUE_VAR_NAME{[&] () -> void { block; }}
 
+void noob_print_ptr(const char* prefix, void* ptr) {
+    fprintf(stderr, "%s: %p\n", prefix, ptr);
+    auto ptrint = (uintptr_t) ptr;
+    fprintf(stderr, "\tradix:  %u\n", extract_radix(ptrint));
+    fprintf(stderr, "\ttoptag: %x\n", extract_toptag(ptrint));
+    fprintf(stderr, "\tintag:  %x\n", extract_inpointertag(ptrint));
+    fprintf(stderr, "\toffset: %lx\n", ptrint & ((1U << extract_radix(ptrint)) - 1));
+}
+
 template<typename T>
 T* noob_striptop(T* ptr) {
     return (T*) ((uintptr_t) ptr & (~0ULL >> TAG_WIDTH)); 
@@ -155,7 +164,7 @@ struct NOOBArena {
         
 #if TAG_POINTERS
         // embed the lowestMSBs in the top bits now
-        auto mask = extract_lowestMSBs(ptr) << (64 - TAG_WIDTH);
+        auto mask = static_cast<uint64_t>(extract_inpointertag(ptr)) << (64 - TAG_WIDTH);
         ptr ^= mask;
 #endif
         return (void*) ptr;
@@ -168,8 +177,8 @@ struct NOOBArena {
     }
 
     void free(void* ptr) {
-        auto lowestMSBs = extract_lowestMSBs((uintptr_t) ptr);
-        auto idx = lowestMSBs - extract_lowestMSBs((uintptr_t) occupied_base);
+        auto lowestMSBs = extract_inpointertag((uintptr_t) ptr);
+        uint idx = lowestMSBs - extract_inpointertag((uintptr_t) occupied_base);
         assert(idx < free_status.size());
         assert(free_status[idx] == false && "Double free! This block is already free.");
         free_status[idx] = true;
@@ -322,7 +331,7 @@ struct NOOBAllocator {
 #if TAG_POINTERS
         // now for a quick security check
         // check that it is still pointing to the original alloc
-        assert(extract_lowestMSBs((uintptr_t) ptr) == extract_topbits((uintptr_t) ptr));
+        assert(extract_inpointertag((uintptr_t) ptr) == extract_toptag((uintptr_t) ptr));
 #endif
         // check that it is pointing to the base of the alloc
         assert(extract_offset((uintptr_t) ptr) == 0);
@@ -423,8 +432,8 @@ static void* check_ptr_arithmetic(void* ptr, void* base) {
     auto offset = ptrint - aritharea_base;
     if (offset >= arith_area_size) {
         fprintf(stderr, "\n\nOut of bounds arithmetic detected!!\n");
-        fprintf(stderr, "ptr: %p\n", ptr);
-        fprintf(stderr, "base: %p\n", base);
+        noob_print_ptr("ptr", ptr);
+        noob_print_ptr("base", base);
         fprintf(stderr, "aritharea of base is [%p, %p[ (size: %llu)\n", (void*) aritharea_base, (void*) (aritharea_base + arith_area_size), arith_area_size);
         fprintf(stderr, "offset of ptr in aritharea is %ld\n", static_cast<intptr_t>(offset));
     }

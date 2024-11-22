@@ -27,12 +27,12 @@ inline uint8_t extract_radix(uintptr_t ptr) {
     return (ptr >> 42) & 0b0011'1111;
 }
 
-inline size_t extract_lowestMSBs(uintptr_t ptr) {
+inline uint8_t extract_inpointertag(uintptr_t ptr) {
     auto radix = extract_radix(ptr);
     return (ptr >> radix) & (~0ULL >> (64 - TAG_WIDTH));
 }
 
-inline size_t extract_topbits(uintptr_t ptr) {
+inline uint8_t extract_toptag(uintptr_t ptr) {
     return ptr >> (64 - TAG_WIDTH);
 }
 
