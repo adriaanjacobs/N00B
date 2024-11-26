@@ -8,6 +8,8 @@ target_compile_options(nooballoc PUBLIC
     -O2
 )
 target_link_libraries(nooballoc "-ldl")
+target_compile_options(nooballoc PRIVATE -flto)
+target_link_options(nooballoc PRIVATE -flto)
 
 add_executable(test_noob test.cpp)
 target_compile_options(test_noob PRIVATE
