@@ -1,0 +1,46 @@
+diff --git a/ggc-page.c b/ggc-page.c
+index d93a509..077662e 100755
+--- a/ggc-page.c
++++ b/ggc-page.c
+@@ -382,6 +382,14 @@ void debug_print_page_list PARAMS ((int));
+ 
+ /* Returns non-zero if P was allocated in GC'able memory.  */
+ 
++const void* noob_striptop(const void* ptr)
++#ifndef NOOB_STRIPTOP
++{
++  return ptr;
++}
++#endif
++;
++
+ static inline int
+ ggc_allocated_p (p)
+      const void *p;
+@@ -393,7 +401,7 @@ ggc_allocated_p (p)
+   base = &G.lookup[0];
+ #else
+   page_table table = G.lookup;
+-  size_t high_bits = (size_t) p & ~ (size_t) 0xffffffff;
++  size_t high_bits = (size_t) noob_striptop(p) & ~ (size_t) 0xffffffff;
+   while (1)
+     {
+       if (table == NULL)
+@@ -426,7 +434,7 @@ lookup_page_table_entry(p)
+   base = &G.lookup[0];
+ #else
+   page_table table = G.lookup;
+-  size_t high_bits = (size_t) p & ~ (size_t) 0xffffffff;
++  size_t high_bits = (size_t) noob_striptop(p) & ~ (size_t) 0xffffffff;
+   while (table->high_bits != high_bits)
+     table = table->next;
+   base = &table->table[0];
+@@ -453,7 +461,7 @@ set_page_table_entry(p, entry)
+   base = &G.lookup[0];
+ #else
+   page_table table;
+-  size_t high_bits = (size_t) p & ~ (size_t) 0xffffffff;
++  size_t high_bits = (size_t) noob_striptop(p) & ~ (size_t) 0xffffffff;
+   for (table = G.lookup; table; table = table->next)
+     if (table->high_bits == high_bits)
+       goto found;

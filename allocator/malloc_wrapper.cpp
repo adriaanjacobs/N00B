@@ -93,6 +93,14 @@ logged_call(const char* funcname, Func&& f, Args&&... args) {
 
 extern "C" {
 
+// for use by applications that (exceptionally) need to strip top bits
+//  not a security hole -> top bits still have to match in-pointer bits during deref
+//  helpful to avoid adversarial edge cases, e.g., gcc's GGC implementation
+const void* noob_striptop(const void* ptr) {
+    // force the c++ version
+    return noob_striptop<const void>(ptr);
+}
+
 decltype(malloc) __libc_malloc;
 void* malloc(size_t nbytes) {
     IF_NOT_HOOKED(__libc_malloc(nbytes));

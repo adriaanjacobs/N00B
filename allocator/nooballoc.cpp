@@ -54,11 +54,6 @@ void noob_print_ptr(const char* prefix, void* ptr) {
     fprintf(stderr, "\toffset: %lx\n", ptrint & ((1U << extract_radix(ptrint)) - 1));
 }
 
-template<typename T>
-T* noob_striptop(T* ptr) {
-    return (T*) ((uintptr_t) ptr & (~0ULL >> TAG_WIDTH)); 
-}
-
 size_t arena_idx_in_size_region(uintptr_t ptr, uint8_t radix) {
     return (ptr - size_region_base(radix)) / single_arena_size(radix);
 }

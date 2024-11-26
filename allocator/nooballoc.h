@@ -1,7 +1,14 @@
 #pragma once
 
+#include <NOOB/config.h>
+
 #include <stddef.h>
 #include <stdint.h>
+
+template<typename T>
+T* noob_striptop(T* ptr) {
+    return (T*) ((uintptr_t) ptr & (~0ULL >> TAG_WIDTH)); 
+}
 
 void noob_non_allocating_printf(const char* fmt, ...);
 
