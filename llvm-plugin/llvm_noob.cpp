@@ -15,6 +15,7 @@
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/DebugInfo.h>
 #include <llvm/Support/FormatVariadic.h>
+#include <llvm/IR/IRPrintingPasses.h>
 #include <llvm/Analysis/StackSafetyAnalysis.h>
 #include <llvm/Transforms/IPO/AlwaysInliner.h>
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
@@ -553,7 +554,11 @@ void NOOBInstrumentationPass::registerAnalyses(llvm::ModuleAnalysisManager& MAM)
     MemAccessInstrumentator::registerAnalyses(MAM);
 }
 
+std::error_code ec;
+llvm::raw_fd_ostream inputModule{"inputmodule.noob.ll", ec};
+
 void NOOBInstrumentationPass::addPasses(llvm::ModulePassManager& MPM) {
+    MPM.addPass(llvm::PrintModulePass{inputModule});
     IsInBoundsAnalysis::addPreparationPasses(MPM);
     MPM.addPass(NOOBInstrumentationPass{});
     MPM.addPass(llvm::VerifierPass{});
