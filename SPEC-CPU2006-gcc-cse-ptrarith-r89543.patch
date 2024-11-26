@@ -1,8 +1,6 @@
-diff --git a/cse.c b/cse.c
-index 65f4542..c4ed4fa 100755
---- a/cse.c
-+++ b/cse.c
-@@ -77,11 +77,12 @@ Registers and "quantity numbers":
+--- cse.c	2020-10-16 14:13:38.154471210 +0200
++++ cse.c	2020-10-16 14:14:32.334836573 +0200
+@@ -77,11 +77,12 @@
     `reg_qty' records what quantity a register is currently thought
     of as containing.
  
@@ -19,7 +17,7 @@ index 65f4542..c4ed4fa 100755
  
     We also maintain a bidirectional chain of registers for each
     quantity number.  The `qty_table` members `first_reg' and `last_reg',
-@@ -520,7 +521,7 @@ struct table_elt
+@@ -520,7 +521,7 @@
  /* Determine if the quantity number for register X represents a valid index
     into the qty_table.  */
  
@@ -28,7 +26,7 @@ index 65f4542..c4ed4fa 100755
  
  static struct table_elt *table[HASH_SIZE];
  
-@@ -963,7 +964,7 @@ get_cse_reg_info (regno)
+@@ -963,7 +964,7 @@
        /* Initialize it.  */
        p->reg_tick = 1;
        p->reg_in_table = -1;
@@ -37,7 +35,7 @@ index 65f4542..c4ed4fa 100755
        p->regno = regno;
        p->next = cse_reg_info_used_list;
        cse_reg_info_used_list = p;
-@@ -987,7 +988,7 @@ new_basic_block ()
+@@ -987,7 +988,7 @@
  {
    int i;
  
@@ -46,7 +44,7 @@ index 65f4542..c4ed4fa 100755
  
    /* Clear out hash table state for this pass.  */
  
-@@ -1138,7 +1139,7 @@ delete_reg_equiv (reg)
+@@ -1138,7 +1139,7 @@
    int p, n;
  
    /* If invalid, do nothing.  */
@@ -55,7 +53,7 @@ index 65f4542..c4ed4fa 100755
      return;
  
    ent = &qty_table[q];
-@@ -1155,7 +1156,7 @@ delete_reg_equiv (reg)
+@@ -1155,7 +1156,7 @@
    else
      ent->first_reg = n;
  
@@ -64,15 +62,7 @@ index 65f4542..c4ed4fa 100755
  }
  
  /* Remove any invalid expressions from the hash table
-@@ -1765,6 +1766,7 @@ merge_equiv_classes (class1, class2)
-       /* Remove old entry, make a new one in CLASS1's class.
- 	 Don't do this for invalid entries as we cannot find their
- 	 hash code (it also isn't necessary).  */
-+	 
-       if (GET_CODE (exp) == REG || exp_equiv_p (exp, exp, 1, 0))
- 	{
- 	  hash_arg_in_memory = 0;
-@@ -7135,8 +7137,6 @@ cse_main (f, nregs, after_loop, file)
+@@ -7135,8 +7136,6 @@
        if (max_qty < 500)
  	max_qty = 500;
  
@@ -81,7 +71,7 @@ index 65f4542..c4ed4fa 100755
        /* If this basic block is being extended by following certain jumps,
           (see `cse_end_of_basic_block'), we reprocess the code from the start.
           Otherwise, we start after this basic block.  */
-@@ -7199,13 +7199,8 @@ cse_basic_block (from, to, next_branch, around_loop)
+@@ -7199,13 +7198,8 @@
    rtx libcall_insn = NULL_RTX;
    int num_insns = 0;
  
@@ -97,7 +87,7 @@ index 65f4542..c4ed4fa 100755
  
    new_basic_block ();
  
-@@ -7301,7 +7296,7 @@ cse_basic_block (from, to, next_branch, around_loop)
+@@ -7301,7 +7295,7 @@
  	{
  	  if (to == 0)
  	    {
@@ -106,7 +96,7 @@ index 65f4542..c4ed4fa 100755
  	      return 0;
  	    }
  
-@@ -7336,7 +7331,7 @@ cse_basic_block (from, to, next_branch, around_loop)
+@@ -7336,7 +7330,7 @@
  	  /* If TO was the last insn in the function, we are done.  */
  	  if (insn == 0)
  	    {
@@ -115,7 +105,7 @@ index 65f4542..c4ed4fa 100755
  	      return 0;
  	    }
  
-@@ -7345,7 +7340,7 @@ cse_basic_block (from, to, next_branch, around_loop)
+@@ -7345,7 +7339,7 @@
  	  prev = prev_nonnote_insn (to);
  	  if (prev && GET_CODE (prev) == BARRIER)
  	    {
@@ -124,7 +114,7 @@ index 65f4542..c4ed4fa 100755
  	      return insn;
  	    }
  
-@@ -7393,7 +7388,7 @@ cse_basic_block (from, to, next_branch, around_loop)
+@@ -7393,7 +7387,7 @@
        && LABEL_NUSES (JUMP_LABEL (insn)) == 1)
      cse_around_loop (JUMP_LABEL (insn));
  
