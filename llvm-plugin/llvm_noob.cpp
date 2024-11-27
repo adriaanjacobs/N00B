@@ -163,7 +163,7 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
     }
 
     LoopHoister loopHoister{module, MAM};
-    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints);
+    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, true);
 
     // keep track of the checkinfos that describe dereferences
     //  this is because they may be deleted (not modified, we check this later) by the next round of optimizations
@@ -211,7 +211,7 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
 
     // then optimize the list _again_. the loophoister will share expanded SCEVs for both i think
     //  the advantage is that this will eliminate dominated arithmetic checks and such
-    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints);
+    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, true);
 
     { // sanitize: check that this second hoisting step did not modify any of the points that also describe dereferences
         // otherwise, the introduction of new points is changing the location of existing points? this may happen in the future
