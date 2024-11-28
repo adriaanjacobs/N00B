@@ -75,7 +75,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
             alignTo = std::max(alignTo, global.getAlign().hasValue() ? global.getAlign()->value() : 16);
             if (alignTo < 16)
                 alignTo = 16;
-            auto radix = std::bit_width(alignTo) - 1;
+            auto radix = std::bit_width(alignTo - 1);
             // fucking sjeng has a 2MB global for fucks sake
             // that's a 1GB arena, with two reserves around it :(((((
             // fuck that shit bro
