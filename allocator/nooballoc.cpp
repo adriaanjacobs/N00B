@@ -398,6 +398,35 @@ size_t noob_usable_size(void* ptr) {
     return 1ULL << radix;
 }
 
+static uintptr_t noob_embed_inpointer_tag(uintptr_t ptr, uint8_t top_tag) {
+    uintptr_t oldptr = ptr;
+    uint64_t mask = top_tag;
+    auto radix = extract_radix(ptr);
+    ptr &= (~0ULL << (radix + TAG_WIDTH));
+    mask <<= radix;
+    ptr |= mask;
+    return ptr;
+}
+
+static void check_ptr_arithmetic(void* ptr, void* base) {
+    auto baseint = (uintptr_t) base;
+    auto ptrint = (uintptr_t) ptr;
+
+    auto radix = extract_radix(baseint);
+    auto mask_invariant_bits = (~0ULL << (radix + TAG_WIDTH + ARITH_LEEWAY_WIDTH));
+    auto arith_area_size = ~mask_invariant_bits;
+    auto aritharea_base = baseint & mask_invariant_bits;
+    auto offset = ptrint - aritharea_base;
+    if (offset >= arith_area_size) {
+        fprintf(stderr, "\n\nOut of bounds arithmetic detected!!\n");
+        noob_print_ptr("ptr", ptr);
+        noob_print_ptr("base", base);
+        fprintf(stderr, "aritharea of base is [%p, %p[ (size: %llu)\n", (void*) aritharea_base, (void*) (aritharea_base + arith_area_size), arith_area_size);
+        fprintf(stderr, "offset of ptr in aritharea is %ld\n", static_cast<intptr_t>(offset));
+    }
+    assert(offset < arith_area_size);
+}
+
 extern "C" {
 
 void noob_allocate_stacks(void** stack_array, uint8_t lowest_radix, uint8_t highest_radix) {
@@ -416,43 +445,33 @@ void noob_allocate_stacks(void** stack_array, uint8_t lowest_radix, uint8_t high
     }
 }
 
-static void* check_ptr_arithmetic(void* ptr, void* base) {
-    auto baseint = (uintptr_t) base;
-    auto ptrint = (uintptr_t) ptr;
-
-    auto radix = extract_radix(baseint);
-    auto mask_invariant_bits = (~0ULL << (radix + TAG_WIDTH + ARITH_LEEWAY_WIDTH));
-    auto arith_area_size = ~mask_invariant_bits;
-    auto aritharea_base = baseint & mask_invariant_bits;
-    auto offset = ptrint - aritharea_base;
-    if (offset >= arith_area_size) {
-        fprintf(stderr, "\n\nOut of bounds arithmetic detected!!\n");
-        noob_print_ptr("ptr", ptr);
-        noob_print_ptr("base", base);
-        fprintf(stderr, "aritharea of base is [%p, %p[ (size: %llu)\n", (void*) aritharea_base, (void*) (aritharea_base + arith_area_size), arith_area_size);
-        fprintf(stderr, "offset of ptr in aritharea is %ld\n", static_cast<intptr_t>(offset));
-    }
-    assert(offset < arith_area_size);
-    
-    return ptr;
-}
-
-void noob_access_check(void* ptr, void* base) {
+void noob_access_check(void* ptr, void* base, bool checkDeref, bool checkArith) {
     // fprintf(stderr, "noob_access_check(%p, %p)\n", ptr, base);
-#if CHECK_POINTER_ARITHMETIC
-    ptr = check_ptr_arithmetic(ptr, base);
-#endif
+    if (checkArith)
+        check_ptr_arithmetic(ptr, base);
 
-#if CHECK_POINTER_DEREFERENCES
+    if (!checkDeref)
+        return;
+
     auto radix = extract_radix((uintptr_t) base);
     auto embedded_tag = ((uintptr_t) ptr >> radix) & ((1ULL << TAG_WIDTH) - 1);
     auto top_tag = ((uintptr_t) ptr >> (64 - TAG_WIDTH));
+    if (!top_tag) // FIXME:: unimplemented stack & global top_tag
+        return;
+    
     if (embedded_tag != top_tag) {
-        // fprintf(stderr, "embedded_tag: %llu\n", embedded_tag);
-        // fprintf(stderr, "top_tag: %lu\n", top_tag);
+        fprintf(stderr, "\n\nDereference check failed!!\n");
+        noob_print_ptr("ptr", ptr);
+        if (base != ptr)
+            noob_print_ptr("base", base);
+
+        auto likely_base = noob_embed_inpointer_tag((uintptr_t) ptr, top_tag);
+        fprintf(stderr, "likely OOB offset %ld into object at %p (size %lu)\n", ((uintptr_t)ptr) - likely_base, noob_striptop((void*) likely_base), 1UL << radix);
+
+        fprintf(stderr, "embedded_tag: %llu\n", embedded_tag);
+        fprintf(stderr, "top_tag: %lu\n", top_tag);
     }
-    // assert(embedded_tag == top_tag); // FIXME: currently still not fully implemented
-#endif
+    assert(embedded_tag == top_tag);
 
     // check if they're accessible
     auto accessptr = (volatile char*) ptr;

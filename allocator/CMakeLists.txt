@@ -3,13 +3,13 @@ cmake_minimum_required(VERSION 3.5) # this can probably be relaxed tbh
 
 add_library(nooballoc SHARED nooballoc.cpp malloc_wrapper.cpp)
 target_compile_options(nooballoc PUBLIC 
-    -std=c++20 -Wall -Wextra -Werror=return-type -Wimplicit-fallthrough -Wno-unused-parameter -Wno-unused-variable
-    -ggdb -fPIC -fno-rtti -fno-exceptions
-    -O2
+    -Wall -Wextra -Werror=return-type -Wimplicit-fallthrough -Wno-unused-parameter -Wno-unused-variable
+    -O2 -std=c++20 -ggdb
 )
-target_link_libraries(nooballoc "-ldl")
+target_compile_options(nooballoc PRIVATE -fno-rtti -fno-exceptions)
 target_compile_options(nooballoc PRIVATE -flto)
 target_link_options(nooballoc PRIVATE -flto)
+target_link_libraries(nooballoc "-ldl")
 
 add_executable(test_noob test.cpp)
 target_compile_options(test_noob PRIVATE

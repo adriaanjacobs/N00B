@@ -290,7 +290,8 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
     auto int64Ty = llvm::Type::getInt64Ty(context);
     auto int8PtrTy = llvm::Type::getInt8PtrTy(context);
     auto int8Ty = llvm::Type::getInt8Ty(context);
-    auto noob_access_check_fn = module.getOrInsertFunction("noob_access_check", llvm::Type::getVoidTy(context), int8PtrTy, int8PtrTy);
+    auto boolTy = llvm::Type::getInt1Ty(context);
+    auto noob_access_check_fn = module.getOrInsertFunction("noob_access_check", llvm::Type::getVoidTy(context), int8PtrTy, int8PtrTy, boolTy, boolTy);
 #if ARITH_CHECK_BRANCH
     auto noob_assert_arithcheck_fn = module.getOrInsertFunction("noob_assert_arithcheck", llvm::Type::getVoidTy(context), int64Ty, int64Ty);
     { // populate the arithmetic checking function
@@ -317,7 +318,9 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
 #if EMIT_RUNTIME_CALLS
         auto ptrAsInt8Ptr = createBitOrPointerCastIfNecessary(checkInfo->pointerOperand, int8PtrTy, "", insertBefore);
         auto baseAsInt8Ptr = createBitOrPointerCastIfNecessary(checkInfo->trackedBase, int8PtrTy, "", insertBefore);
-        llvm::CallInst::Create(noob_access_check_fn, {ptrAsInt8Ptr, baseAsInt8Ptr}, "", insertBefore);
+        auto checkDerefBool = llvm::ConstantInt::getBool(boolTy, checkInfo->shouldCheckDereference());
+        auto checkArithBool = llvm::ConstantInt::getBool(boolTy, checkInfo->shouldCheckArith());
+        llvm::CallInst::Create(noob_access_check_fn, {ptrAsInt8Ptr, baseAsInt8Ptr, checkDerefBool, checkArithBool}, "", insertBefore);
 #else
         // compute radix from base! otherwise potentially overwritten in ptr
         auto baseAsInt = llvm::CastInst::CreateBitOrPointerCast(checkInfo->trackedBase, int64Ty, "", insertBefore);
