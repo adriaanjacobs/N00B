@@ -409,6 +409,7 @@ void noob_allocate_stacks(void** stack_array, uint8_t lowest_radix, uint8_t high
         // let's try to map this immediately at the start of the size region
         auto stack = mmap_arena_aritharea(radix, NOOB_STACK_SIZE, (void*) size_region_base(radix));
         assert(extract_radix((uintptr_t) stack) == radix);
+        assert(extract_toptag((uintptr_t) stack) == 0); // stackptr shouldnt be toptagged
         // we leave a guard page at the end here to detect stack overflow
         ASSERT_ELSE_PERROR(mprotect(stack, NOOB_STACK_SIZE - 0x1000, PROT_READ|PROT_WRITE) == 0);
         stack_array[radix] = stack;

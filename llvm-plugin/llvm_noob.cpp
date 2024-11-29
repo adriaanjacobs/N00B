@@ -273,6 +273,14 @@ static llvm::Value* computeRadix(llvm::Value* ptrAsInt, llvm::Instruction* inser
     );
 }
 
+static llvm::Value* computeInPointerTagMask(llvm::Value* ptrAsInt, llvm::Value* radix,  llvm::Instruction* insertBefore) {
+    auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
+
+    auto inPointerTag = llvm::BinaryOperator::CreateLShr(ptrAsInt, radix, "", insertBefore);
+    auto inPointerTagMask = llvm::BinaryOperator::CreateShl(inPointerTag, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH}), "", insertBefore);
+    return inPointerTagMask;
+}
+
 // actually modify the program to insert the checks and update the usesToReplace
 void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>>& checkInfoToUses) {
     //  keep in mind here that multiple uses can use the same instrumentation
@@ -359,11 +367,10 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
             auto ptrAsInt = new llvm::PtrToIntInst(ptr, int64Ty, "", insertBefore);
 
             // compute the mask to XOR with based on the lowest TAG_WIDTH bits of the base pointer
-            auto invariantBitMask = llvm::BinaryOperator::CreateLShr(ptrAsInt, radix, "", insertBefore);
-            invariantBitMask = llvm::BinaryOperator::CreateShl(invariantBitMask, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH}), "", insertBefore);
+            auto inPointerTagMask = computeInPointerTagMask(ptrAsInt, radix, insertBefore);
 
             // xor the pointer and replace the access ptroperand
-            auto maskedPtrAsInt = llvm::BinaryOperator::CreateXor(ptrAsInt, invariantBitMask, "", insertBefore);
+            auto maskedPtrAsInt = llvm::BinaryOperator::CreateXor(ptrAsInt, inPointerTagMask, "", insertBefore);
             auto maskedPtr= new llvm::IntToPtrInst(maskedPtrAsInt, ptr->getType(), "", insertBefore);
             checkInfo->pointerOperand = maskedPtr;
         }
@@ -408,7 +415,8 @@ void NOOBInstrumentationPass::moveUnsafeAllocasToNOOBStacks(llvm::Module& module
         llvm::ConstantAggregateZero::get(noobStackPtrArrayType), 
         "noob.stackptrarray"
     );
-        
+    auto int64Ty = llvm::Type::getInt64Ty(context);
+    
     uint8_t lowestRadix = UINT8_MAX;
     uint8_t highestRadix = 0;
     for (auto& [func, allocas] : unsafeAllocas) {
@@ -436,25 +444,33 @@ void NOOBInstrumentationPass::moveUnsafeAllocasToNOOBStacks(llvm::Module& module
             radixToUnsafeAllocas[radix].push_back(alloca);
         }
 
-        auto insertBefore = &*func->getEntryBlock().getFirstInsertionPt();
+        auto insertAllocaPtrsBefore = &*func->getEntryBlock().getFirstInsertionPt();
         llvm::DenseMap<llvm::AllocaInst*, llvm::Value*> allocaToNewStackAlloc;
         for (auto& [radix, allocas] : radixToUnsafeAllocas) {
             // retrieve the "thread-local" stack pointer for this radix
             auto addressOfRadixStackPtr = llvm::ConstantExpr::getInBoundsGetElementPtr(noobStackPtrArrayType, noobStackPtrArray, llvm::ArrayRef{llvm::ConstantInt::getNullValue(llvm::Type::getInt64Ty(context)), llvm::ConstantInt::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt{64, radix})});
-            auto radixStackPtr = new llvm::LoadInst(llvm::Type::getInt8PtrTy(context), addressOfRadixStackPtr, llvm::formatv("noob.stackptr.{0}", radix), insertBefore);
+            auto radixStackPtr = new llvm::LoadInst(llvm::Type::getInt8PtrTy(context), addressOfRadixStackPtr, llvm::formatv("noob.stackptr.{0}", radix), insertAllocaPtrsBefore);
 
             // now allocate the necessary amount for this function and update the stackPtr slot in memory
             auto numObjects = allocas.size();
-            auto endOfRadixStackPtr = llvm::GetElementPtrInst::CreateInBounds(llvm::Type::getInt8Ty(context), radixStackPtr, {llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt{64, numObjects * (1ULL << radix)})}, "", insertBefore);
-            new llvm::StoreInst(endOfRadixStackPtr, addressOfRadixStackPtr, insertBefore);
+            auto endOfRadixStackPtr = llvm::GetElementPtrInst::CreateInBounds(llvm::Type::getInt8Ty(context), radixStackPtr, {llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt{64, numObjects * (1ULL << radix)})}, "", insertAllocaPtrsBefore);
+            new llvm::StoreInst(endOfRadixStackPtr, addressOfRadixStackPtr, insertAllocaPtrsBefore);
 
             // now create the offset pointers that represent the individual allocas
             for (uint idx = 0; idx < allocas.size(); idx++) {
                 auto alloca = allocas[idx];
-                auto offsetStackPtr = llvm::GetElementPtrInst::CreateInBounds(llvm::Type::getInt8Ty(context), radixStackPtr, {llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt{64, idx * (1ULL << radix)})}, "", alloca);
+                llvm::Value* offsetStackPtr = llvm::GetElementPtrInst::CreateInBounds(llvm::Type::getInt8Ty(context), radixStackPtr, {llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt{64, idx * (1ULL << radix)})}, "", alloca);
                 // i needn't concern myself with marking these as "noalias" here -- we should only do this at the very end of the optimization pipeline
                 // any optimizations that benefit from the aliasing information should have been done by now
-                auto castedPtr = llvm::CastInst::CreatePointerCast(offsetStackPtr, alloca->getType(), alloca->getName(), alloca);
+
+                // now put the in-pointer tag in the top tag to make the pointer fully NOOB-compliant
+                offsetStackPtr = castToInt64Ty(offsetStackPtr, alloca);
+                auto radixVal = llvm::ConstantInt::get(int64Ty, {64, radix});
+                auto inPointerTagMask = computeInPointerTagMask(offsetStackPtr, radixVal, alloca);
+                // assuming that offsetStackPtr's top tag is 0 here (which it should be)
+                offsetStackPtr = llvm::BinaryOperator::CreateOr(offsetStackPtr, inPointerTagMask, "", alloca);
+
+                auto castedPtr = llvm::CastInst::CreateBitOrPointerCast(offsetStackPtr, alloca->getType(), alloca->getName(), alloca);
                 alloca->replaceAllUsesWith(castedPtr);
             }
 
