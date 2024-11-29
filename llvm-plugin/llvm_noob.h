@@ -1,12 +1,44 @@
 #pragma once
 
+#include <llvm-utils/instrpointoptimization/hoistloopmemaccesses.h>
+
 #include <llvm/IR/PassManager.h>
 
 #include <optional>
+#include <map>
+
+struct CheckInfo : public InstrumentationPoint {
+    llvm::Value* trackedBase = pointerOperand;
+    const bool checkDereference;
+
+    CheckInfo(llvm::Instruction* insertBefore, llvm::Value* pointerOperand, bool checkDereference) : 
+        InstrumentationPoint(insertBefore, pointerOperand), checkDereference{checkDereference}
+    {}
+
+    bool shouldCheckArith () const {
+        return trackedBase != pointerOperand;
+    }
+
+    bool shouldCheckDereference() const {
+        return checkDereference;
+    }
+
+    bool operator==(const CheckInfo& other) const {
+        // doesn't take into account padding, but that's okay: our current use case does not compare
+        //  objects at different locations, but the same object at different times. padding shouldnt be modified.
+        return std::memcmp(this, &other, sizeof(*this)) == 0;
+    }
+};
 
 //===----------------------------------------------------------------------===//
 /// This class implements an LLVM module transformation pass.
 class NOOBInstrumentationPass : public llvm::PassInfoMixin<NOOBInstrumentationPass> {
+    std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> findNOOBGlobals(llvm::Module&, llvm::ModuleAnalysisManager& MAM);
+    void extendNOOBLinkerScript(std::string& noobLinkerScript, const std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>>& radixToGlobals);
+
+    llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> createInstrumentationPlans(llvm::Module& module, llvm::ModuleAnalysisManager& MAM);
+    void applyNOOBChecks(llvm::Module& module, const llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>>& checkInfoToUses);
+
 public:
     explicit NOOBInstrumentationPass() = default;
     ~NOOBInstrumentationPass() = default;
