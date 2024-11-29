@@ -39,6 +39,9 @@ class NOOBInstrumentationPass : public llvm::PassInfoMixin<NOOBInstrumentationPa
     llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> createInstrumentationPlans(llvm::Module& module, llvm::ModuleAnalysisManager& MAM);
     void applyNOOBChecks(llvm::Module& module, const llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>>& checkInfoToUses);
 
+    llvm::DenseMap<llvm::Function*, llvm::DenseSet<llvm::AllocaInst*>> findUnsafeAllocas(llvm::Module& module, llvm::ModuleAnalysisManager& MAM);
+    void moveUnsafeAllocasToNOOBStacks(llvm::Module& module, const llvm::DenseMap<llvm::Function*, llvm::DenseSet<llvm::AllocaInst*>>& unsafeAllocas);
+
 public:
     explicit NOOBInstrumentationPass() = default;
     ~NOOBInstrumentationPass() = default;

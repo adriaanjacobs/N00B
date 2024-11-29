@@ -377,8 +377,26 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
     }
 }
 
+llvm::DenseMap<llvm::Function*, llvm::DenseSet<llvm::AllocaInst*>> NOOBInstrumentationPass::findUnsafeAllocas(llvm::Module& module, llvm::ModuleAnalysisManager& MAM) {
+    // find all unsafe stack objects & move them
+    llvm::DenseMap<llvm::Function*, llvm::DenseSet<llvm::AllocaInst*>> unsafeAllocas;
+    auto& stackSafetyAnalysis = MAM.getResult<llvm::StackSafetyGlobalAnalysis>(module);
+    for (auto& func : module) {
+        if (func.isDeclaration())
+            continue;
+
+        for (auto& inst : llvm::instructions(func)) 
+            if (auto alloca = llvm::dyn_cast<llvm::AllocaInst>(&inst)) 
+                if (!stackSafetyAnalysis.isSafe(*alloca) && alloca->isStaticAlloca()) 
+                    unsafeAllocas[&func].insert(alloca);
+    }
+
+    return unsafeAllocas;
+}
+
+
 // move all unsafe stack objects to per-radix noobstacks
-void moveUnsafeAllocasToNOOBStacks(llvm::Module& module, llvm::ModuleAnalysisManager& MAM) {
+void NOOBInstrumentationPass::moveUnsafeAllocasToNOOBStacks(llvm::Module& module, const llvm::DenseMap<llvm::Function*, llvm::DenseSet<llvm::AllocaInst*>>& unsafeAllocas) {
     // create an array of per-radix noob-stackptrs
     auto& context = module.getContext();
     auto noobStackPtrArrayType = llvm::ArrayType::get(llvm::Type::getInt8PtrTy(context), 64);
@@ -390,44 +408,35 @@ void moveUnsafeAllocasToNOOBStacks(llvm::Module& module, llvm::ModuleAnalysisMan
         llvm::ConstantAggregateZero::get(noobStackPtrArrayType), 
         "noob.stackptrarray"
     );
-
-    // find all unsafe stack objects & move them
-    auto& stackSafetyAnalysis = MAM.getResult<llvm::StackSafetyGlobalAnalysis>(module);
+        
     uint8_t lowestRadix = UINT8_MAX;
     uint8_t highestRadix = 0;
-    for (auto& func : module) {
-        if (func.isDeclaration())
-            continue;
-
+    for (auto& [func, allocas] : unsafeAllocas) {
         llvm::DenseMap<llvm::TypeSize::ScalarTy, llvm::SmallVector<llvm::AllocaInst*>> radixToUnsafeAllocas;
-        for (auto& inst : llvm::instructions(func)) {
-            if (auto alloca = llvm::dyn_cast<llvm::AllocaInst>(&inst)) {
-                if (!stackSafetyAnalysis.isSafe(*alloca) && alloca->isStaticAlloca()) {
-                    auto sizeInBitsOpt = alloca->getAllocationSizeInBits(module.getDataLayout());
-                    ASSERT_ELSE_UNKOWN(sizeInBitsOpt.hasValue(), alloca); // will fail for VLAs
-                    auto sizeInBits = sizeInBitsOpt->getFixedSize(); // may fail for VLAs still
-                    auto sizeInBytes = __builtin_align_up(sizeInBits, 8) / 8;
-                    auto alignedSizeInBytes = std::bit_ceil(sizeInBytes);
-                    alignedSizeInBytes = std::max(alignedSizeInBytes, alloca->getAlign().value()); // if alignment is greater, get it
-                    if (alignedSizeInBytes > NOOB_STACK_SIZE)
-                        llvm::errs() << "alignedSizeInBytes = " << alignedSizeInBytes << "\n";
-                    ASSERT_ELSE_UNKOWN(alignedSizeInBytes <= NOOB_STACK_SIZE, alloca);
+        for (auto alloca : allocas) {
+            auto sizeInBitsOpt = alloca->getAllocationSizeInBits(module.getDataLayout());
+            ASSERT_ELSE_UNKOWN(sizeInBitsOpt.hasValue(), alloca); // will fail for VLAs
+            auto sizeInBits = sizeInBitsOpt->getFixedSize(); // may fail for VLAs still
+            auto sizeInBytes = __builtin_align_up(sizeInBits, 8) / 8;
+            auto alignedSizeInBytes = std::bit_ceil(sizeInBytes);
+            alignedSizeInBytes = std::max(alignedSizeInBytes, alloca->getAlign().value()); // if alignment is greater, get it
+            if (alignedSizeInBytes > NOOB_STACK_SIZE)
+                llvm::errs() << "alignedSizeInBytes = " << alignedSizeInBytes << "\n";
+            ASSERT_ELSE_UNKOWN(alignedSizeInBytes <= NOOB_STACK_SIZE, alloca);
 
-                    auto radix = std::max(3UL, std::bit_width(alignedSizeInBytes) - 1);
+            auto radix = std::max(3UL, std::bit_width(alignedSizeInBytes) - 1);
 
-                    // keep track of the max and min radix here
-                    if (radix < lowestRadix)
-                        lowestRadix = radix;
-                    if (radix > highestRadix)
-                        highestRadix = radix;
+            // keep track of the max and min radix here
+            if (radix < lowestRadix)
+                lowestRadix = radix;
+            if (radix > highestRadix)
+                highestRadix = radix;
 
-                    ASSERT_ELSE_UNKOWN(alignedSizeInBytes >= alloca->getAlign().value(), alloca);
-                    radixToUnsafeAllocas[radix].push_back(alloca);
-                }
-            }
+            ASSERT_ELSE_UNKOWN(alignedSizeInBytes >= alloca->getAlign().value(), alloca);
+            radixToUnsafeAllocas[radix].push_back(alloca);
         }
 
-        auto insertBefore = &*func.getEntryBlock().getFirstInsertionPt();
+        auto insertBefore = &*func->getEntryBlock().getFirstInsertionPt();
         llvm::DenseMap<llvm::AllocaInst*, llvm::Value*> allocaToNewStackAlloc;
         for (auto& [radix, allocas] : radixToUnsafeAllocas) {
             // retrieve the "thread-local" stack pointer for this radix
@@ -450,7 +459,7 @@ void moveUnsafeAllocasToNOOBStacks(llvm::Module& module, llvm::ModuleAnalysisMan
             }
 
             // now insert the deallocation routine at all `return` locations of this function
-            for (auto& bb : func) {
+            for (auto& bb : *func) {
                 if (auto ret = llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator())) {
                     // for now, we're lazy and use the old stackPtr, as a kind of "frame pointer"
                     // we might potentially get better results by loading back from memory & recomputing here
@@ -519,8 +528,9 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
     llvm::AlwaysInlinerPass alwaysInliner;
     alwaysInliner.run(module, MAM);
 
+    auto unsafeAllocas = findUnsafeAllocas(module, MAM);
 #if REPLACE_STACK_ALLOCS
-    moveUnsafeAllocasToNOOBStacks(module, MAM);
+    moveUnsafeAllocasToNOOBStacks(module, unsafeAllocas);
 #endif
 
     // add IR-level debuginfo
