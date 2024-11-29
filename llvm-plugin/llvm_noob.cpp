@@ -24,7 +24,7 @@
 
 // find all the globals we want to wrap, compute their radix, and set the minimum alignment
 // std::map so we get it nice and ordered
-std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> NOOBInstrumentationPass::findNOOBGlobals(llvm::Module& module, llvm::ModuleAnalysisManager& MAM) {
+std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> NOOBInstrumentationPass::findUnsafeGlobals(llvm::Module& module, llvm::ModuleAnalysisManager& MAM) {
     auto& unsafeAccessInfo = MAM.getResult<UnsafeAccessFinderAnalysis>(module).getOrCreate(false);
     auto& callSiteAnalysis = MAM.getResult<CallSiteAnalysis>(module);
     std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> radixToGlobals;
@@ -505,33 +505,37 @@ void NOOBInstrumentationPass::moveUnsafeAllocasToNOOBStacks(llvm::Module& module
 
 llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm::ModuleAnalysisManager& MAM) { 
     // find unsafe globals up front, before modification
-    auto radixToGlobals = findNOOBGlobals(module, MAM);
-    // generated linker script based on target arch & noob config
-    //  we extend this dynamically with global sections & segments
-    std::string defaultLinkerScript {
+    const auto radixToGlobals = findUnsafeGlobals(module, MAM);
+    // also find unsafe allocas up front
+    const auto unsafeAllocas = findUnsafeAllocas(module, MAM);
+
+    // then figure out the instrumentation plans (also on a largely unmodified module)
+    //  this is because the baseptrtracker will look right through our tag embedding or unsafe stack alloc
+    auto checkInfoToUses = createInstrumentationPlans(module, MAM);
+    // now actually instrument pointer arithmetic and dereferences
+    applyNOOBChecks(module, checkInfoToUses);
+
+    // now, start instrumenting globals & allocas
+    std::string noobLinkerScript {
+        // generated linker script based on target arch & noob config
+        //  we extend this dynamically with global sections & segments
         #include "noob_linker_script.ld"
     };
 #if REMAP_GLOBALS
-    extendNOOBLinkerScript(defaultLinkerScript, radixToGlobals);
+    extendNOOBLinkerScript(noobLinkerScript, radixToGlobals);
 #endif
     std::error_code ec;
     llvm::raw_fd_ostream linkerScript{"noob_linker_script.ld", ec};
     assert(ec.value() == 0);
-    linkerScript << defaultLinkerScript;
+    linkerScript << noobLinkerScript;
 
-    // now instrument pointer arithmetic and dereferences
-    //  FIXME:: we should do this before the global remapping & stack alloc introduction, 
-    //  because the baseptrtracker will look right through our tag embedding or unsafe stack alloc
-    auto checkInfoToUses = createInstrumentationPlans(module, MAM);
-    applyNOOBChecks(module, checkInfoToUses);
-    // inline any always_inline functions we emitted as part of the instrumentation
-    llvm::AlwaysInlinerPass alwaysInliner;
-    alwaysInliner.run(module, MAM);
-
-    auto unsafeAllocas = findUnsafeAllocas(module, MAM);
 #if REPLACE_STACK_ALLOCS
     moveUnsafeAllocasToNOOBStacks(module, unsafeAllocas);
 #endif
+
+    // inline any always_inline functions we emitted as part of the instrumentation
+    llvm::AlwaysInlinerPass alwaysInliner;
+    alwaysInliner.run(module, MAM);
 
     // add IR-level debuginfo
     {

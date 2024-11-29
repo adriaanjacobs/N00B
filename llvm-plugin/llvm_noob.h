@@ -33,7 +33,7 @@ struct CheckInfo : public InstrumentationPoint {
 //===----------------------------------------------------------------------===//
 /// This class implements an LLVM module transformation pass.
 class NOOBInstrumentationPass : public llvm::PassInfoMixin<NOOBInstrumentationPass> {
-    std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> findNOOBGlobals(llvm::Module&, llvm::ModuleAnalysisManager& MAM);
+    std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> findUnsafeGlobals(llvm::Module&, llvm::ModuleAnalysisManager& MAM);
     void extendNOOBLinkerScript(std::string& noobLinkerScript, const std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>>& radixToGlobals);
 
     llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> createInstrumentationPlans(llvm::Module& module, llvm::ModuleAnalysisManager& MAM);
