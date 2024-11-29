@@ -162,11 +162,9 @@ struct NOOBArena {
         auto ptr = ((uintptr_t) occupied_base) + idx * block_size(radix);
         assert(extract_radix(ptr) == radix);
         
-#if TAG_POINTERS
         // embed the lowestMSBs in the top bits now
         auto mask = static_cast<uint64_t>(extract_inpointertag(ptr)) << (64 - TAG_WIDTH);
         ptr ^= mask;
-#endif
         return (void*) ptr;
     }
 
@@ -295,11 +293,9 @@ struct NOOBAllocator {
         hooked{hooked},
         max_radix{max_radix}
     {
-#if TAG_POINTERS
         // start by enabling the tagged address ABI
         if (prctl(PR_SET_TAGGED_ADDR_CTRL, PR_TAGGED_ADDR_ENABLE, 0, 0, 0, 0) == -1)
             perror("enable tagged address kernel abi");
-#endif
         assert(max_radix > min_radix && max_radix < (42 - TAG_WIDTH));
         for (uint8_t radix = min_radix; radix <= max_radix; radix++) {
             per_size_allocators.push_back(NOOBSizeAllocator{radix});
@@ -328,11 +324,9 @@ struct NOOBAllocator {
 
     void free(void* ptr) {
         auto radix = extract_radix((uintptr_t) ptr);
-#if TAG_POINTERS
         // now for a quick security check
         // check that it is still pointing to the original alloc
         assert(extract_inpointertag((uintptr_t) ptr) == extract_toptag((uintptr_t) ptr));
-#endif
         // check that it is pointing to the base of the alloc
         assert(extract_offset((uintptr_t) ptr) == 0);
 
@@ -456,9 +450,7 @@ void noob_access_check(void* ptr, void* base) {
         // fprintf(stderr, "embedded_tag: %llu\n", embedded_tag);
         // fprintf(stderr, "top_tag: %lu\n", top_tag);
     }
-#if TAG_POINTERS
     // assert(embedded_tag == top_tag); // FIXME: currently still not fully implemented
-#endif
 #endif
 
     // check if they're accessible
