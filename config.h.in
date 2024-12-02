@@ -1,6 +1,7 @@
 #pragma once
 
 #define TAG_WIDTH                   (${TAG_WIDTH})
+static_assert(TAG_WIDTH == 8, "we make this assumption almost everywhere in the source at this point");
 #define ARITH_LEEWAY_WIDTH          (${ARITH_LEEWAY_WIDTH})
 static_assert(ARITH_LEEWAY_WIDTH == 0, "we don't need to permit additional arithmetic");
 #define ARITH_LEEWAY_OCCUPIED_BITS  (${ARITH_LEEWAY_OCCUPIED_BITS})
