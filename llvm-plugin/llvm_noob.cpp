@@ -294,6 +294,7 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
     auto noob_access_check_fn = module.getOrInsertFunction("noob_access_check", llvm::Type::getVoidTy(context), int8PtrTy, int8PtrTy, boolTy, boolTy);
 #if ARITH_CHECK_BRANCH
     auto noob_assert_arithcheck_fn = module.getOrInsertFunction("noob_assert_arithcheck", llvm::Type::getVoidTy(context), int64Ty, int64Ty);
+    llvm::cast<llvm::Function>(noob_assert_arithcheck_fn.getCallee())->addFnAttr(llvm::Attribute::AlwaysInline);
     { // populate the arithmetic checking function
         auto func = llvm::cast<llvm::Function>(noob_assert_arithcheck_fn.getCallee());
         auto entry = llvm::BasicBlock::Create(context, "entry", func);
