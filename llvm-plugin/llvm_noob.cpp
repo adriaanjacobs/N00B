@@ -304,8 +304,8 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
         auto thenBlockTerm = llvm::SplitBlockAndInsertIfThen(cmp, ret, true);
         assert(thenBlockTerm != ret);
 
-        auto abort_fn = module.getOrInsertFunction("abort", llvm::Type::getVoidTy(context));
-        auto callAbort = llvm::CallInst::Create(abort_fn, "", thenBlockTerm);
+        auto trap_fn = llvm::Intrinsic::getDeclaration(&module, llvm::Intrinsic::trap);
+        auto callTrap = llvm::CallInst::Create(trap_fn, "", thenBlockTerm);
     }
 #endif
     // now insert an arithmetic & tag check at all dereference sites
@@ -345,13 +345,13 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
             auto arithAreaBase = llvm::BinaryOperator::CreateAnd(maskInvariantBits, baseAsInt, "", insertBefore);
             
             auto ptrAsInt = llvm::CastInst::CreateBitOrPointerCast(checkInfo->pointerOperand, int64Ty, "", insertBefore);
-            auto maskVariantBits = llvm::BinaryOperator::CreateXor(
+            auto arithAreaSize = llvm::BinaryOperator::CreateXor(
                 maskInvariantBits, 
                 llvm::Constant::getIntegerValue(int64Ty, llvm::APInt{64, static_cast<uint64_t>(-1), true}), 
                 "", 
                 insertBefore
             );
-            auto inArithAreaOffset = llvm::BinaryOperator::CreateAnd(maskVariantBits, ptrAsInt, "", insertBefore);
+            auto inArithAreaOffset = llvm::BinaryOperator::CreateAnd(arithAreaSize, ptrAsInt, "", insertBefore);
             auto safePtrAsInt = llvm::BinaryOperator::CreateAdd(arithAreaBase, inArithAreaOffset, "", insertBefore);
 #if ARITH_CHECK_BRANCH
             auto callCheckArith = llvm::CallInst::Create(noob_assert_arithcheck_fn, {ptrAsInt, safePtrAsInt}, "", insertBefore);
