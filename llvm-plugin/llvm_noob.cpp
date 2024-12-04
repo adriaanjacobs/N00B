@@ -370,24 +370,19 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
             auto ptr = checkInfo->pointerOperand;            
             auto ptrAsInt = new llvm::PtrToIntInst(ptr, int64Ty, "", insertBefore);
 
-            // compute the mask to XOR with based on the lowest TAG_WIDTH bits of the base pointer
-            auto inPointerTagMask = computeInPointerTagMask(ptrAsInt, radix, insertBefore);
-            // shift right by TAG_WIDTH bits
-            inPointerTagMask = llvm::BinaryOperator::CreateLShr(inPointerTagMask, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, TAG_WIDTH}), "", insertBefore);
+            // compute the xor of the tags in the lowest TAG_WIDTH bits
+            auto inPointerTag = llvm::BinaryOperator::CreateLShr(ptrAsInt, radix, "iptag", insertBefore);
+            auto topTag = llvm::BinaryOperator::CreateLShr(ptrAsInt, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH}), "toptag", insertBefore);
+            auto isNotInBounds = llvm::BinaryOperator::CreateXor(inPointerTag, topTag, "notinbounds", insertBefore);
+            isNotInBounds = llvm::BinaryOperator::CreateShl(isNotInBounds, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH - TAG_WIDTH}), "", insertBefore);
 
-            // compute the mask for the top bits too
-            //  mask out the non-toptag bits
-            auto topTagMask = llvm::BinaryOperator::CreateAnd(ptrAsInt, llvm::Constant::getIntegerValue(int64Ty, llvm::APInt{64, ~((1ULL << (64 - TAG_WIDTH)) - 1)}), "", insertBefore);
-            //  shift the toptag down by TAG_WIDTH
-            topTagMask = llvm::BinaryOperator::CreateLShr(topTagMask, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, TAG_WIDTH}), "", insertBefore);
+            // place the resulting value in the |top bits|_here_|radix|rest of pointer ...|
+            //  it's not a problem that the more significant bits of the `isNotInBounds` value likely aren't 0 here, they will get ignored by TBI anyway
+            llvm::Value* safePtr = llvm::BinaryOperator::CreateOr(ptrAsInt, isNotInBounds, "safeptr", insertBefore);
+            safePtr = new llvm::IntToPtrInst(safePtr, ptr->getType(), "", insertBefore);
 
-            // xor them to verify equality
-            auto resultMask = llvm::BinaryOperator::CreateXor(topTagMask, inPointerTagMask, "", insertBefore);
-
-            // xor the pointer with the result and replace the access ptroperand
-            auto maskedPtrAsInt = llvm::BinaryOperator::CreateXor(ptrAsInt, resultMask, "", insertBefore);
-            auto maskedPtr= new llvm::IntToPtrInst(maskedPtrAsInt, ptr->getType(), "", insertBefore);
-            checkInfo->pointerOperand = maskedPtr;
+            // replace the access ptroperand
+            checkInfo->pointerOperand = safePtr;
         }
 
         // now replace all uses that are checked by this pointeroperand
