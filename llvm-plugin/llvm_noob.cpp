@@ -255,8 +255,7 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
     return checkInfoToUses;
 }
 
-[[maybe_unused]]
-static llvm::Value* computeRadix(llvm::Value* ptrAsInt, llvm::Instruction* insertBefore) {
+llvm::Value* NOOBInstrumentationPass::computeRadix(llvm::Value* ptrAsInt, llvm::Instruction* insertBefore) {
     auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
     auto radix = llvm::BinaryOperator::CreateLShr(
         ptrAsInt, 
@@ -273,18 +272,46 @@ static llvm::Value* computeRadix(llvm::Value* ptrAsInt, llvm::Instruction* inser
     );
 }
 
-static llvm::Value* computeInPointerTagMask(llvm::Value* ptrAsInt, llvm::Value* radix,  llvm::Instruction* insertBefore) {
+llvm::Value* NOOBInstrumentationPass::computeSafeInArithAreaPtr(llvm::Value* ptr, llvm::Value* arithAreaSize, llvm::Value* arithAreaBase, llvm::Value* trackedBase, llvm::Instruction* insertBefore) {
     auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
+    auto int8PtrTy = llvm::Type::getInt8PtrTy(insertBefore->getContext());
+    auto int8Ty = llvm::Type::getInt8Ty(insertBefore->getContext());
+    auto ptrAsInt = createBitOrPointerCastIfNecessary(ptr, int64Ty, "", insertBefore);
+    auto inArithAreaOffset = llvm::BinaryOperator::CreateAnd(arithAreaSize, ptrAsInt, "", insertBefore);
+    auto safePtrAsInt = llvm::BinaryOperator::CreateAdd(arithAreaBase, inArithAreaOffset, "", insertBefore);
+    auto baseAsInt = createBitOrPointerCastIfNecessary(trackedBase, int64Ty, "", insertBefore);
+    auto diffWithBase = llvm::BinaryOperator::CreateSub(safePtrAsInt, baseAsInt, "", insertBefore);
+    auto baseAsInt8Ptr = createBitOrPointerCastIfNecessary(trackedBase, int8PtrTy, "", insertBefore);
+    llvm::Value* provenancedSafePtr = llvm::GetElementPtrInst::Create(int8Ty, baseAsInt8Ptr, {diffWithBase}, "", insertBefore);
+    provenancedSafePtr = createBitOrPointerCastIfNecessary(provenancedSafePtr, ptr->getType(), "", insertBefore);
+    return provenancedSafePtr;
+}
 
-    auto inPointerTag = llvm::BinaryOperator::CreateLShr(ptrAsInt, radix, "", insertBefore);
-    auto inPointerTagMask = llvm::BinaryOperator::CreateShl(inPointerTag, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH}), "", insertBefore);
-    return inPointerTagMask;
+llvm::Value* NOOBInstrumentationPass::computeInPointerTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore) {
+    auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
+    auto ptrAsInt = createBitOrPointerCastIfNecessary(ptr, int64Ty, "", insertBefore);
+    return llvm::BinaryOperator::CreateLShr(ptrAsInt, radix, "iptag", insertBefore);
+}
+
+llvm::Value* NOOBInstrumentationPass::computeInPointerTagMask(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore) {
+    auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
+    auto inPointerTag = computeInPointerTag(ptr, radix, insertBefore);
+    return llvm::BinaryOperator::CreateShl(inPointerTag, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH}), "", insertBefore);
+}
+
+llvm::Value* NOOBInstrumentationPass::computeTopTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore) {
+    auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
+    auto ptrAsInt = createBitOrPointerCastIfNecessary(ptr, int64Ty, "", insertBefore);
+    return llvm::BinaryOperator::CreateLShr(ptrAsInt, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH}), "toptag", insertBefore);
 }
 
 // actually modify the program to insert the checks and update the usesToReplace
 void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>>& checkInfoToUses) {
     //  keep in mind here that multiple uses can use the same instrumentation
     //  invert the checkinfo map here to ensure we only insert instrumentation once per instpoint
+
+    // dump before we modify too much
+    dumpModuleToFile(module, "beforeinstrumentation.noob.ll");
 
     auto& context = module.getContext();
     auto int64Ty = llvm::Type::getInt64Ty(context);
@@ -293,10 +320,13 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
     auto boolTy = llvm::Type::getInt1Ty(context);
     auto noob_access_check_fn = module.getOrInsertFunction("noob_access_check", llvm::Type::getVoidTy(context), int8PtrTy, int8PtrTy, boolTy, boolTy);
     // now insert an arithmetic & tag check at all dereference sites
+    llvm::DenseSet<llvm::Use*> replacedUses;
     for (auto& [checkInfo, usesToReplace] : checkInfoToUses) {
-        // FIXME: we dont support range checking yet. we would currently not correctly replace the uses
-        if (checkInfo->isRangeCheck())
-            continue;
+        // wouldnt know why such checks would ever be pruned here
+        if (checkInfo->isRangeCheck()) {
+            assert(checkInfo->shouldCheckDereference());
+            assert(usesToReplace.size() == 1);
+        }
 
         auto insertBefore = checkInfo->insertBefore;
 
@@ -327,37 +357,54 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
                 insertBefore
             );
             auto arithAreaBase = llvm::BinaryOperator::CreateAnd(maskInvariantBits, baseAsInt, "", insertBefore);
-            
-            auto ptrAsInt = llvm::CastInst::CreateBitOrPointerCast(checkInfo->pointerOperand, int64Ty, "", insertBefore);
             auto arithAreaSize = llvm::BinaryOperator::CreateXor(
                 maskInvariantBits, 
                 llvm::Constant::getIntegerValue(int64Ty, llvm::APInt{64, static_cast<uint64_t>(-1), true}), 
                 "", 
                 insertBefore
             );
-            auto inArithAreaOffset = llvm::BinaryOperator::CreateAnd(arithAreaSize, ptrAsInt, "", insertBefore);
-            auto safePtrAsInt = llvm::BinaryOperator::CreateAdd(arithAreaBase, inArithAreaOffset, "", insertBefore);
-            auto diffWithBase = llvm::BinaryOperator::CreateSub(safePtrAsInt, baseAsInt, "", insertBefore);
-            auto baseAsInt8Ptr = llvm::CastInst::CreateBitOrPointerCast(checkInfo->trackedBase, int8PtrTy, "", insertBefore);
-            llvm::Instruction* provenancedSafePtr = llvm::GetElementPtrInst::Create(int8Ty, baseAsInt8Ptr, {diffWithBase}, "", insertBefore);
-            provenancedSafePtr = llvm::CastInst::CreateBitOrPointerCast(provenancedSafePtr, checkInfo->pointerOperand->getType(), "", insertBefore);
-            checkInfo->pointerOperand = provenancedSafePtr;
+            auto provenancedSafePtr = computeSafeInArithAreaPtr(checkInfo->pointerOperand, arithAreaSize, arithAreaBase, checkInfo->trackedBase, insertBefore);
+            if (checkInfo->isRangeCheck()) { // check before setting ->pointerOperand!
+                checkInfo->pointerOperand = provenancedSafePtr;
+                checkInfo->endOfAddressRange = computeSafeInArithAreaPtr(checkInfo->endOfAddressRange, arithAreaSize, arithAreaBase, checkInfo->trackedBase, insertBefore);
+            } else {
+                checkInfo->pointerOperand = provenancedSafePtr;
+                // make sure the later dereference check still observes this as a non-range check
+                checkInfo->endOfAddressRange = checkInfo->pointerOperand;
+            }
         }
 
         // now instrument all pointer dereferences to verify that the top bits match the in-pointer bits
         if (checkInfo->shouldCheckDereference()) {
             assert(CHECK_POINTER_DEREFERENCES);
-            auto ptr = checkInfo->pointerOperand;            
-            auto ptrAsInt = new llvm::PtrToIntInst(ptr, int64Ty, "", insertBefore);
 
-            // compute the xor of the tags in the lowest TAG_WIDTH bits
-            auto inPointerTag = llvm::BinaryOperator::CreateLShr(ptrAsInt, radix, "iptag", insertBefore);
-            auto topTag = llvm::BinaryOperator::CreateLShr(ptrAsInt, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH}), "toptag", insertBefore);
+            // find the in pointer tag and top tag
+            auto inPointerTag = computeInPointerTag(checkInfo->pointerOperand, radix, insertBefore);
+            const auto topTag = computeTopTag(checkInfo->pointerOperand, radix, insertBefore);
+
+            if (checkInfo->isRangeCheck()) {
+                auto endOfAddrIpTag = computeInPointerTag(checkInfo->endOfAddressRange, radix, insertBefore);
+                inPointerTag = llvm::BinaryOperator::CreateOr(inPointerTag, endOfAddrIpTag, "", insertBefore);
+                // we're going to feed this value into a loop, where it could escape
+                //  make sure that our later XOR preserves the correct top bits in the pointer
+                //  clear the top bits
+                inPointerTag = llvm::BinaryOperator::CreateAnd(inPointerTag, llvm::ConstantInt::getIntegerValue(int64Ty, {64, (1UL << TAG_WIDTH) - 1}), "", insertBefore);
+                assert(usesToReplace.size() == 1); // otherwise we've started finding non-loop-bound uses for loop range checks?
+                // crucial: make sure the pointer being poisoned is the actual start value of the loop
+                //  this can be different than the current pointerOperand, which is simply the lowest value of the accessed range
+                assert(!replacedUses.contains(*usesToReplace.begin()));
+                checkInfo->pointerOperand = (*usesToReplace.begin())->get();
+            }
+            
+            // xor the iptag with the toptag
             auto isNotInBounds = llvm::BinaryOperator::CreateXor(inPointerTag, topTag, "notinbounds", insertBefore);
             isNotInBounds = llvm::BinaryOperator::CreateShl(isNotInBounds, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH - TAG_WIDTH}), "", insertBefore);
 
             // place the resulting value in the |top bits|_here_|radix|rest of pointer ...|
             //  it's not a problem that the more significant bits of the `isNotInBounds` value likely aren't 0 here, they will get ignored by TBI anyway
+            //  this would only be a problem for range checks, where the pointer value could escape, but we zero out the top bits there for that reason
+            auto ptr = checkInfo->pointerOperand;            
+            auto ptrAsInt = new llvm::PtrToIntInst(ptr, int64Ty, "", insertBefore);
             llvm::Value* safePtr = llvm::BinaryOperator::CreateOr(ptrAsInt, isNotInBounds, "safeptr", insertBefore);
             safePtr = new llvm::IntToPtrInst(safePtr, ptr->getType(), "", insertBefore);
 
@@ -369,9 +416,12 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
         for (auto useToReplace : usesToReplace) {
             auto castedPtr = createBitOrPointerCastIfNecessary(checkInfo->pointerOperand, useToReplace->get()->getType(), "", llvm::cast<llvm::Instruction>(useToReplace->getUser()));
             useToReplace->set(castedPtr);
+            replacedUses.insert(useToReplace);
         }
 #endif
     }
+
+    dumpModuleToFile(module, "afterinstrumentation.noob.ll");
 }
 
 llvm::DenseMap<llvm::Function*, llvm::DenseSet<llvm::AllocaInst*>> NOOBInstrumentationPass::findUnsafeAllocas(llvm::Module& module, llvm::ModuleAnalysisManager& MAM) {

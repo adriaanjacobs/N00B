@@ -42,6 +42,12 @@ class NOOBInstrumentationPass : public llvm::PassInfoMixin<NOOBInstrumentationPa
     llvm::DenseMap<llvm::Function*, llvm::DenseSet<llvm::AllocaInst*>> findUnsafeAllocas(llvm::Module& module, llvm::ModuleAnalysisManager& MAM);
     void moveUnsafeAllocasToNOOBStacks(llvm::Module& module, const llvm::DenseMap<llvm::Function*, llvm::DenseSet<llvm::AllocaInst*>>& unsafeAllocas);
 
+    llvm::Value* computeRadix(llvm::Value* ptrAsInt, llvm::Instruction* insertBefore);
+    llvm::Value* computeSafeInArithAreaPtr(llvm::Value* ptr, llvm::Value* arithAreaSize, llvm::Value* arithAreaBase, llvm::Value* trackedBase, llvm::Instruction* insertBefore);
+    llvm::Value* computeInPointerTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore);
+    llvm::Value* computeInPointerTagMask(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore);
+    llvm::Value* computeTopTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore);
+
 public:
     explicit NOOBInstrumentationPass() = default;
     ~NOOBInstrumentationPass() = default;
