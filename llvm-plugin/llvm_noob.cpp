@@ -292,22 +292,6 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
     auto int8Ty = llvm::Type::getInt8Ty(context);
     auto boolTy = llvm::Type::getInt1Ty(context);
     auto noob_access_check_fn = module.getOrInsertFunction("noob_access_check", llvm::Type::getVoidTy(context), int8PtrTy, int8PtrTy, boolTy, boolTy);
-#if ARITH_CHECK_BRANCH
-    auto noob_assert_arithcheck_fn = module.getOrInsertFunction("noob_assert_arithcheck", llvm::Type::getVoidTy(context), int64Ty, int64Ty);
-    llvm::cast<llvm::Function>(noob_assert_arithcheck_fn.getCallee())->addFnAttr(llvm::Attribute::AlwaysInline);
-    { // populate the arithmetic checking function
-        auto func = llvm::cast<llvm::Function>(noob_assert_arithcheck_fn.getCallee());
-        auto entry = llvm::BasicBlock::Create(context, "entry", func);
-        auto ret = llvm::ReturnInst::Create(context, entry);
-
-        auto cmp = new llvm::ICmpInst(ret, llvm::ICmpInst::ICMP_NE, func->getArg(0), func->getArg(1));
-        auto thenBlockTerm = llvm::SplitBlockAndInsertIfThen(cmp, ret, true);
-        assert(thenBlockTerm != ret);
-
-        auto trap_fn = llvm::Intrinsic::getDeclaration(&module, llvm::Intrinsic::trap);
-        auto callTrap = llvm::CallInst::Create(trap_fn, "", thenBlockTerm);
-    }
-#endif
     // now insert an arithmetic & tag check at all dereference sites
     for (auto& [checkInfo, usesToReplace] : checkInfoToUses) {
         // FIXME: we dont support range checking yet. we would currently not correctly replace the uses
@@ -353,15 +337,11 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
             );
             auto inArithAreaOffset = llvm::BinaryOperator::CreateAnd(arithAreaSize, ptrAsInt, "", insertBefore);
             auto safePtrAsInt = llvm::BinaryOperator::CreateAdd(arithAreaBase, inArithAreaOffset, "", insertBefore);
-#if ARITH_CHECK_BRANCH
-            auto callCheckArith = llvm::CallInst::Create(noob_assert_arithcheck_fn, {ptrAsInt, safePtrAsInt}, "", insertBefore);
-#else
             auto diffWithBase = llvm::BinaryOperator::CreateSub(safePtrAsInt, baseAsInt, "", insertBefore);
             auto baseAsInt8Ptr = llvm::CastInst::CreateBitOrPointerCast(checkInfo->trackedBase, int8PtrTy, "", insertBefore);
             llvm::Instruction* provenancedSafePtr = llvm::GetElementPtrInst::Create(int8Ty, baseAsInt8Ptr, {diffWithBase}, "", insertBefore);
             provenancedSafePtr = llvm::CastInst::CreateBitOrPointerCast(provenancedSafePtr, checkInfo->pointerOperand->getType(), "", insertBefore);
             checkInfo->pointerOperand = provenancedSafePtr;
-#endif
         }
 
         // now instrument all pointer dereferences to verify that the top bits match the in-pointer bits
