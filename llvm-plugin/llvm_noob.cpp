@@ -155,11 +155,13 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
             else HANDLE_UNKOWN_VALUE(access);
         } (access);
         auto& ptrUse = access->getOperandUse(ptrOperandIdx);
+#if CHECK_DEREFERENCE_SITES
         // this use shouldnt exist yet
         ASSERT_ELSE_UNKOWN(!funcToCheckPoints[access->getFunction()].count(&ptrUse), access);
         auto newCheckInfo = new CheckInfo(access, ptrUse.get(), CHECK_POINTER_DEREFERENCES);
         funcToCheckPoints[access->getFunction()][&ptrUse] = newCheckInfo;
         dbg_checkInfos.insert(newCheckInfo);
+#endif
     }
 
     LoopHoister loopHoister{module, MAM};
@@ -194,11 +196,13 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
             // the user is always an instruction here!! (otherwise we're doing an unsafe but constant escape??)
             auto userInst = llvm::dyn_cast<llvm::Instruction>(user);
             ASSERT_ELSE_UNKOWN(userInst, user);
+#if CHECK_ESCAPE_SITES
             // this use shouldnt exist yet
             ASSERT_ELSE_UNKOWN(!funcToCheckPoints[userInst->getFunction()].count(use), user);
             auto newCheckInfo = new CheckInfo(userInst, use->get(), false);
             funcToCheckPoints[userInst->getFunction()][use] = newCheckInfo;
             dbg_checkInfos.insert(newCheckInfo);
+#endif
         }
     }
 
