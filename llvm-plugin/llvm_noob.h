@@ -10,9 +10,10 @@
 struct CheckInfo : public InstrumentationPoint {
     llvm::Value* trackedBase = pointerOperand;
     const bool checkDereference;
+    const bool isEscapeSite;
 
-    CheckInfo(llvm::Instruction* insertBefore, llvm::Value* pointerOperand, bool checkDereference) : 
-        InstrumentationPoint(insertBefore, pointerOperand), checkDereference{checkDereference}
+    CheckInfo(llvm::Instruction* insertBefore, llvm::Value* pointerOperand, bool checkDereference, bool isEscapeSite) : 
+        InstrumentationPoint(insertBefore, pointerOperand), checkDereference{checkDereference}, isEscapeSite{isEscapeSite}
     {}
 
     bool shouldCheckArith () const {
@@ -47,6 +48,7 @@ class NOOBInstrumentationPass : public llvm::PassInfoMixin<NOOBInstrumentationPa
     llvm::Value* computeInPointerTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore);
     llvm::Value* computeInPointerTagMask(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore);
     llvm::Value* computeTopTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore);
+    llvm::Value* computePoisonMaskAtDerefSite(const CheckInfo& checkInfo, llvm::Value* baseAsInt, llvm::Value* radix, llvm::Instruction* insertBefore);
 
 public:
     explicit NOOBInstrumentationPass() = default;

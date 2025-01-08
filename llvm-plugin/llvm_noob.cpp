@@ -158,7 +158,7 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
 #if CHECK_DEREFERENCE_SITES
         // this use shouldnt exist yet
         ASSERT_ELSE_UNKOWN(!funcToCheckPoints[access->getFunction()].count(&ptrUse), access);
-        auto newCheckInfo = new CheckInfo(access, ptrUse.get(), CHECK_POINTER_DEREFERENCES);
+        auto newCheckInfo = new CheckInfo(access, ptrUse.get(), CHECK_POINTER_DEREFERENCES, false);
         funcToCheckPoints[access->getFunction()][&ptrUse] = newCheckInfo;
         dbg_checkInfos.insert(newCheckInfo);
 #endif
@@ -199,7 +199,7 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
 #if CHECK_ESCAPE_SITES
             // this use shouldnt exist yet
             ASSERT_ELSE_UNKOWN(!funcToCheckPoints[userInst->getFunction()].count(use), user);
-            auto newCheckInfo = new CheckInfo(userInst, use->get(), false);
+            auto newCheckInfo = new CheckInfo(userInst, use->get(), false, true);
             funcToCheckPoints[userInst->getFunction()][use] = newCheckInfo;
             dbg_checkInfos.insert(newCheckInfo);
 #endif
@@ -309,6 +309,57 @@ llvm::Value* NOOBInstrumentationPass::computeTopTag(llvm::Value* ptr, llvm::Valu
     return llvm::BinaryOperator::CreateLShr(ptrAsInt, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH}), "toptag", insertBefore);
 }
 
+llvm::Value* NOOBInstrumentationPass::computePoisonMaskAtDerefSite(const CheckInfo& checkInfo, llvm::Value* baseAsInt, llvm::Value* radix, llvm::Instruction* insertBefore) {
+    auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
+    // FIXME: "mbedtls_md5_starts_ret" in benchmark.ll has an example at the top of an unnecessary arith check. why do we have it??
+    if (checkInfo.shouldCheckArith()) {
+        assert(CHECK_POINTER_ARITHMETIC);
+        static_assert(ARITH_LEEWAY_WIDTH == 0, "I did not account for non-zero leeway bits here");
+        // common case: we check both arith & deref
+        //  implement optimized instrumentation here, that checks arith & deref at once
+        auto topTag = computeTopTag(baseAsInt, radix, insertBefore);
+        auto origObj = llvm::BinaryOperator::CreateLShr(baseAsInt, radix, "", insertBefore);
+        origObj = llvm::BinaryOperator::CreateAnd(origObj, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, ~((1ULL << TAG_WIDTH) - 1)}), "", insertBefore); // clear bottom TAG_WIDTH bits
+        origObj = llvm::BinaryOperator::CreateOr(origObj, topTag, "", insertBefore);
+        auto ptrAsInt = castToInt64Ty(checkInfo.pointerOperand, insertBefore);
+        auto currentObj = llvm::BinaryOperator::CreateLShr(ptrAsInt, radix, "", insertBefore);
+        llvm::Instruction* isInBounds = new llvm::ICmpInst(insertBefore, llvm::ICmpInst::ICMP_EQ, currentObj, origObj, "");
+        if (checkInfo.isRangeCheck()) {
+            // also check whether the endOfAddressRange is in bounds, and OR the result with the previous isInBounds
+            auto endOfRangeAsInt = castToInt64Ty(checkInfo.endOfAddressRange, insertBefore);
+            auto endOfRangeObj = llvm::BinaryOperator::CreateLShr(endOfRangeAsInt, radix, "", insertBefore);
+            auto endOfRangeInBounds = new llvm::ICmpInst(insertBefore, llvm::ICmpInst::ICMP_EQ, endOfRangeObj, origObj, "");
+            // isInBounds = isInBounds && endOfRangeInBounds
+            isInBounds = llvm::SelectInst::Create(isInBounds, endOfRangeInBounds, isInBounds, "", insertBefore);
+        }
+        auto poisonMask = llvm::SelectInst::Create(isInBounds, llvm::ConstantInt::getNullValue(int64Ty), llvm::ConstantInt::get(int64Ty, llvm::APInt{64, (1ULL << (64 - TAG_WIDTH - TAG_WIDTH))}), "", insertBefore);
+        return poisonMask;
+    } else {
+        // rarer case: we only check deref, because arith got pruned
+        //  implement an even more optimized version here that solely checks deref
+        // find the in pointer tag and top tag
+        const auto topTag = computeTopTag(checkInfo.trackedBase, radix, insertBefore);
+        auto inPointerTag = computeInPointerTag(checkInfo.pointerOperand, radix, insertBefore);
+        // xor the iptag with the toptag
+        auto isNotInBounds = llvm::BinaryOperator::CreateXor(inPointerTag, topTag, "notinbounds", insertBefore);
+        if (checkInfo.isRangeCheck()) {
+            auto endOfAddrIpTag = computeInPointerTag(checkInfo.endOfAddressRange, radix, insertBefore);
+            auto endOfAddrNotInBounds = llvm::BinaryOperator::CreateXor(endOfAddrIpTag, topTag, "notinbounds", insertBefore);
+            // isNotInBounds = isNotInBounds || endOfAddrNotInBounds
+            isNotInBounds = llvm::BinaryOperator::CreateOr(isNotInBounds, endOfAddrNotInBounds, "notinbounds", insertBefore);
+            // we're going to feed this value into a loop, where it could escape
+            //  make sure that our later XOR preserves the correct top bits in the pointer
+            //  clear the top bits
+            isNotInBounds = llvm::BinaryOperator::CreateAnd(isNotInBounds, llvm::ConstantInt::getIntegerValue(int64Ty, {64, (1UL << TAG_WIDTH) - 1}), "", insertBefore);
+        }
+        // place the resulting value in the |top bits|_here_|radix|rest of pointer ...|
+        //  it's (generally) not a problem that the more significant bits of the `poisonMask` value likely aren't 0 here, they will get ignored by TBI anyway
+        //  this would only be a problem for range checks, where the pointer value could escape, but we zero out the top bits of isNotInBounds for that reason
+        auto poisonMask = llvm::BinaryOperator::CreateShl(isNotInBounds, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH - TAG_WIDTH}), "", insertBefore);
+        return poisonMask;
+    }
+}
+
 // actually modify the program to insert the checks and update the usesToReplace
 void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>>& checkInfoToUses) {
     //  keep in mind here that multiple uses can use the same instrumentation
@@ -345,9 +396,34 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
         auto baseAsInt = llvm::CastInst::CreateBitOrPointerCast(checkInfo->trackedBase, int64Ty, "", insertBefore);
         auto radix = computeRadix(baseAsInt, insertBefore);
 
-        // check if the dereferenced pointer is immediately loaded/created, i.e., no arithmetic happened on it
-        if (checkInfo->shouldCheckArith()) {
-            ASSERT_ELSE_UNKOWN(CHECK_POINTER_ARITHMETIC, checkInfo->trackedBase);
+        if (checkInfo->shouldCheckDereference()) {
+            assert(!checkInfo->isEscapeSite);
+            assert(CHECK_POINTER_DEREFERENCES);
+            assert(CHECK_DEREFERENCE_SITES); // should never deref check escape sites
+            auto poisonMask = computePoisonMaskAtDerefSite(*checkInfo, baseAsInt, radix, insertBefore);
+            if (checkInfo->isRangeCheck()) {
+                // crucial: make sure the pointer being poisoned later on is the actual start value of the loop
+                //  this can be different than the current pointerOperand, which is simply the lowest value of the accessed range
+                assert(!replacedUses.contains(*usesToReplace.begin()));
+                assert(usesToReplace.size() == 1); // otherwise we've started finding non-loop-bound uses for loop range checks?
+                checkInfo->pointerOperand = (*usesToReplace.begin())->get();
+            }
+            // poison the pointerOperand
+            auto ptrAsInt = castToInt64Ty(checkInfo->pointerOperand, insertBefore); // reset the ptrAsInt because isRangeCheck clause mightve changed pointerOperand
+            llvm::Instruction* poisonedPtr = llvm::BinaryOperator::CreateOr(ptrAsInt, poisonMask, "", insertBefore);
+            poisonedPtr = new llvm::IntToPtrInst(poisonedPtr, checkInfo->pointerOperand->getType(), "", insertBefore);
+            // replace the access ptroperand
+            checkInfo->pointerOperand = poisonedPtr;
+        } else if (checkInfo->shouldCheckArith()) {
+            assert(checkInfo->isEscapeSite);
+            // this is an escape site. wrap the pointer instead of poisoning
+            //  are we sure this is an escape site though?
+            //  maybe a dereference check got pruned in the hoisting?
+            //  but if it got pruned, its arith check should for sure also have gotten pruned
+            assert(CHECK_POINTER_ARITHMETIC);
+            assert(CHECK_ESCAPE_SITES); // should never elide deref checking on deref sites
+            ASSERT_ELSE_UNKOWN(!checkInfo->isRangeCheck(), checkInfo->pointerOperand); // our typical range check poisoning approach wouldnt work here
+
             // maskForInvariantBits = (~0ULL) << (radix + TAG_WIDTH + ARITH_LEEWAY_WIDTH);
             // = (~0ULL << (TAG_WIDTH + ARITH_LEEWAY_WIDTH)) << radix
             llvm::Value* maskInvariantBits = llvm::ConstantExpr::getShl(
@@ -368,52 +444,9 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
                 insertBefore
             );
             auto provenancedSafePtr = computeSafeInArithAreaPtr(checkInfo->pointerOperand, arithAreaSize, arithAreaBase, checkInfo->trackedBase, insertBefore);
-            if (checkInfo->isRangeCheck()) { // check before setting ->pointerOperand!
-                checkInfo->pointerOperand = provenancedSafePtr;
-                checkInfo->endOfAddressRange = computeSafeInArithAreaPtr(checkInfo->endOfAddressRange, arithAreaSize, arithAreaBase, checkInfo->trackedBase, insertBefore);
-            } else {
-                checkInfo->pointerOperand = provenancedSafePtr;
-                // make sure the later dereference check still observes this as a non-range check
-                checkInfo->endOfAddressRange = checkInfo->pointerOperand;
-            }
-        }
-
-        // now instrument all pointer dereferences to verify that the top bits match the in-pointer bits
-        if (checkInfo->shouldCheckDereference()) {
-            assert(CHECK_POINTER_DEREFERENCES);
-
-            // find the in pointer tag and top tag
-            auto inPointerTag = computeInPointerTag(checkInfo->pointerOperand, radix, insertBefore);
-            const auto topTag = computeTopTag(checkInfo->pointerOperand, radix, insertBefore);
-
-            if (checkInfo->isRangeCheck()) {
-                auto endOfAddrIpTag = computeInPointerTag(checkInfo->endOfAddressRange, radix, insertBefore);
-                inPointerTag = llvm::BinaryOperator::CreateOr(inPointerTag, endOfAddrIpTag, "", insertBefore);
-                // we're going to feed this value into a loop, where it could escape
-                //  make sure that our later XOR preserves the correct top bits in the pointer
-                //  clear the top bits
-                inPointerTag = llvm::BinaryOperator::CreateAnd(inPointerTag, llvm::ConstantInt::getIntegerValue(int64Ty, {64, (1UL << TAG_WIDTH) - 1}), "", insertBefore);
-                assert(usesToReplace.size() == 1); // otherwise we've started finding non-loop-bound uses for loop range checks?
-                // crucial: make sure the pointer being poisoned is the actual start value of the loop
-                //  this can be different than the current pointerOperand, which is simply the lowest value of the accessed range
-                assert(!replacedUses.contains(*usesToReplace.begin()));
-                checkInfo->pointerOperand = (*usesToReplace.begin())->get();
-            }
-            
-            // xor the iptag with the toptag
-            auto isNotInBounds = llvm::BinaryOperator::CreateXor(inPointerTag, topTag, "notinbounds", insertBefore);
-            isNotInBounds = llvm::BinaryOperator::CreateShl(isNotInBounds, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH - TAG_WIDTH}), "", insertBefore);
-
-            // place the resulting value in the |top bits|_here_|radix|rest of pointer ...|
-            //  it's not a problem that the more significant bits of the `isNotInBounds` value likely aren't 0 here, they will get ignored by TBI anyway
-            //  this would only be a problem for range checks, where the pointer value could escape, but we zero out the top bits there for that reason
-            auto ptr = checkInfo->pointerOperand;            
-            auto ptrAsInt = new llvm::PtrToIntInst(ptr, int64Ty, "", insertBefore);
-            llvm::Value* safePtr = llvm::BinaryOperator::CreateOr(ptrAsInt, isNotInBounds, "safeptr", insertBefore);
-            safePtr = new llvm::IntToPtrInst(safePtr, ptr->getType(), "", insertBefore);
-
-            // replace the access ptroperand
-            checkInfo->pointerOperand = safePtr;
+            checkInfo->pointerOperand = provenancedSafePtr;
+            // make sure later code still observes this as a non-range check
+            checkInfo->endOfAddressRange = checkInfo->pointerOperand;
         }
 
         // now replace all uses that are checked by this pointeroperand
