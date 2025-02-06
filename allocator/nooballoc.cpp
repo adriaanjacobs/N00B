@@ -49,9 +49,9 @@ void noob_print_ptr(const char* prefix, void* ptr) {
     fprintf(stderr, "%s: %p\n", prefix, ptr);
     auto ptrint = (uintptr_t) ptr;
     fprintf(stderr, "\tradix:  %u\n", extract_radix(ptrint));
-    fprintf(stderr, "\ttoptag: %x\n", extract_toptag(ptrint));
-    fprintf(stderr, "\tintag:  %x\n", extract_inpointertag(ptrint));
-    fprintf(stderr, "\toffset: %lx\n", ptrint & ((1U << extract_radix(ptrint)) - 1));
+    fprintf(stderr, "\ttoptag: 0x%x\n", extract_toptag(ptrint));
+    fprintf(stderr, "\tintag:  0x%x\n", extract_inpointertag(ptrint));
+    fprintf(stderr, "\toffset: 0x%lx\n", ptrint & ((1U << extract_radix(ptrint)) - 1));
 }
 
 size_t arena_idx_in_size_region(uintptr_t ptr, uint8_t radix) {
@@ -456,8 +456,6 @@ void noob_access_check(void* ptr, void* base, bool checkDeref, bool checkArith) 
     auto radix = extract_radix((uintptr_t) base);
     auto embedded_tag = ((uintptr_t) ptr >> radix) & ((1ULL << TAG_WIDTH) - 1);
     auto top_tag = ((uintptr_t) ptr >> (64 - TAG_WIDTH));
-    if (!top_tag) // FIXME:: unimplemented stack & global top_tag
-        return;
     
     if (embedded_tag != top_tag) {
         fprintf(stderr, "\n\nDereference check failed!!\n");
