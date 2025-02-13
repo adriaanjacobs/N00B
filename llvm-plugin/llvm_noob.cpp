@@ -377,10 +377,9 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
     // now insert an arithmetic & tag check at all dereference sites
     llvm::DenseSet<llvm::Use*> replacedUses;
     for (auto& [checkInfo, usesToReplace] : checkInfoToUses) {
-        // wouldnt know why such checks would ever be pruned here
         if (checkInfo->isRangeCheck()) {
+            // wouldnt know why such checks would ever be pruned here
             assert(checkInfo->shouldCheckDereference());
-            assert(usesToReplace.size() == 1);
         }
 
         auto insertBefore = checkInfo->insertBefore;
@@ -405,8 +404,18 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
                 // crucial: make sure the pointer being poisoned later on is the actual start value of the loop
                 //  this can be different than the current pointerOperand, which is simply the lowest value of the accessed range
                 assert(!replacedUses.contains(*usesToReplace.begin()));
-                assert(usesToReplace.size() == 1); // otherwise we've started finding non-loop-bound uses for loop range checks?
-                checkInfo->pointerOperand = (*usesToReplace.begin())->get();
+                // it's possible that there are multiple usesToReplace for a range check. 
+                //  i've found a case in SPEC17 x264_s where loop-invariant & loop-variant memory accesses all used the same check
+                //  in that case, we replace all the uses. We just enforce here (for simplicity) that they all share the same pointeroperand. 
+                //  which is the case for x264_s :)
+                auto pointerOperand = [&usesToReplace = usesToReplace] () -> llvm::Value* {
+                    llvm::DenseSet<llvm::Value*> ptrOperands;
+                    for (auto use : usesToReplace)
+                        ptrOperands.insert(use->get());
+                    assert(ptrOperands.size() == 1);
+                    return *ptrOperands.begin();
+                } ();
+                checkInfo->pointerOperand = pointerOperand;
             }
             // poison the pointerOperand
             auto ptrAsInt = castToInt64Ty(checkInfo->pointerOperand, insertBefore); // reset the ptrAsInt because isRangeCheck clause mightve changed pointerOperand
