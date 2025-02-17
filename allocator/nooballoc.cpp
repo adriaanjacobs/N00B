@@ -45,9 +45,18 @@ struct run_on_destruct {
 #define UNIQUE_VAR_NAME CONCAT(_unique_var_, __COUNTER__)
 #define defer(block) run_on_destruct UNIQUE_VAR_NAME{[&] () -> void { block; }}
 
+bool noob_is_nonnoob(uintptr_t ptr) {
+    return extract_radix(ptr) > NOOB_MAX_RADIX;
+}
+
 void noob_print_ptr(const char* prefix, void* ptr) {
     fprintf(stderr, "%s: %p\n", prefix, ptr);
     auto ptrint = (uintptr_t) ptr;
+    if (noob_is_nonnoob(ptrint)) {
+        fprintf(stderr, "\tnon-noob managed pointer\n");
+        return;
+    }
+    
     fprintf(stderr, "\tradix:  %u\n", extract_radix(ptrint));
     fprintf(stderr, "\ttoptag: 0x%x\n", extract_toptag(ptrint));
     fprintf(stderr, "\tintag:  0x%x\n", extract_inpointertag(ptrint));
