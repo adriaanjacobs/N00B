@@ -20,5 +20,8 @@
 !llvm-plugin/
 !llvm-plugin/**/
 
+!patches/
+!patches/**/
+
 !test/
 !test/**/
