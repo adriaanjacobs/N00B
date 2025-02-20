@@ -9,7 +9,7 @@
 !*.cmake
 !*.in
 !*.patch
-
+!*.sh
 
 !allocator/
 !allocator/**/
