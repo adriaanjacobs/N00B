@@ -7,7 +7,6 @@
 #include <assert.h>
 #include <dlfcn.h>
 
-#include <iterator>
 #include <bit>
 #include <functional>
 #include <type_traits>
@@ -47,19 +46,6 @@ struct unhook_scope {
         hooked = oldval;
     }
 };
-
-// if we are linking into a hardened program, this function will be defined by the NOOB compiler
-extern "C" void noob_initialize_noobstacks() __attribute__((weak));
-
-[[gnu::constructor(0)]]
-void init_noob() {
-    fprintf(stderr, "Initializing NOOB...\n");
-    if (noob_initialize_noobstacks) // the function exists. we are linked into a hardened NOOB program
-        noob_initialize_noobstacks();
-
-    noob_init(42 - TAG_WIDTH - 1, &hooked);
-    hooked = true;
-}
 
 #define IF_NOT_HOOKED(expr)    \
     if (!hooked)                \

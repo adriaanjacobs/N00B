@@ -16,7 +16,6 @@
 
 #include <vector>
 #include <bit>
-#include <optional>
 #include <bitset>
 #include <map>
 #include <functional>
@@ -45,8 +44,13 @@ struct run_on_destruct {
 #define UNIQUE_VAR_NAME CONCAT(_unique_var_, __COUNTER__)
 #define defer(block) run_on_destruct UNIQUE_VAR_NAME{[&] () -> void { block; }}
 
+#define NUM_BLOCKS_IN_ARENA         (1U << TAG_WIDTH)
+#define TAG_T_MAX                   (NUM_BLOCKS_IN_ARENA - 1)
+
+#define TAG_POINTERS                1
+
 bool noob_is_nonnoob(uintptr_t ptr) {
-    return extract_radix(ptr) > NOOB_MAX_RADIX;
+    return extract_radix(ptr) >= NON_NOOB_MIN_RADIX;
 }
 
 void noob_print_ptr(const char* prefix, void* ptr) {
@@ -70,6 +74,13 @@ size_t arena_idx_in_size_region(uintptr_t ptr, uint8_t radix) {
 size_t arena_idx_in_size_region(uintptr_t ptr) {
     auto radix = extract_radix(ptr);
     return arena_idx_in_size_region(ptr, radix);
+}
+
+inline size_t arena_base(uintptr_t ptr) {
+    auto radix = extract_radix(ptr);
+    ptr &= (~0ULL >> TAG_WIDTH); // clear the top bits
+    ptr &= ~static_cast<uint64_t>(TAG_T_MAX) << radix; // clear the iptag & offset
+    return ptr;
 }
 
 // finds & returns an size-aligned mapping of size `size` containing `in_pointer_radix` in the radix bits
@@ -107,7 +118,7 @@ static void* mmap_arena_aritharea(uint8_t in_pointer_radix, size_t aritharea_siz
     assert(aloc % aritharea_size == 0);
     assert(aloc % single_arena_size(in_pointer_radix) == 0);
     return (void*) aloc;
-}
+}  
 
 struct NOOBArena {
     std::bitset<NUM_BLOCKS_IN_ARENA> free_status;
@@ -127,21 +138,21 @@ struct NOOBArena {
     }
 
     bool contains(void* ptr) {
-        return extract_highestMSBs((uintptr_t) ptr) == extract_highestMSBs((uintptr_t) occupied_base);
+        return arena_base((uintptr_t) ptr) == (uintptr_t) occupied_base;
     }
 
     size_t idx_in_containing_size_region() const {
         return arena_idx_in_size_region((uintptr_t) occupied_base, radix);
     }
 
-    NOOBArena(uint8_t radix, void* suggested_location) :
+    NOOBArena(uint8_t radix, void* location, bool is_suggestion = true) :
         radix{radix}
     {
         free_status.flip(); // set all to free
         fresh_status.flip(); // at first, all blocks are fresh
 
-        {   // set the first and last cache line of every arena to "allocated"
-            //  this is a poor man's way to ensure arithmetic-capable start/end objects
+        {   // set (at least) the first and last cache line of every arena to "allocated"
+            //  this is a poor man's way to ensure benign arithmetic-capable boundary objects
             auto num_indices = std::max(1UL, 64UL / (1UL << radix));
             for (uint i = 0; i < num_indices; i++) {
                 auto complementary_i = free_status.size() - 1 - i;
@@ -150,13 +161,14 @@ struct NOOBArena {
                 fresh_status[i] = false;
                 fresh_status[complementary_i] = false;
             }
+            assert(free_status.any()); // otherwise this arena is so small we just filled it with arithmetic padding
         }
 
-        auto aritharea_size = single_arena_size(radix) << ARITH_LEEWAY_WIDTH;
-        aritharea_base = mmap_arena_aritharea(radix, aritharea_size, suggested_location);
+        aritharea_base = !is_suggestion ? location : mmap_arena_aritharea(radix, arith_area_size(radix), location);
         // get rw access to the actual arena in the "middle"
         occupied_base = (void*) (((uintptr_t) aritharea_base) + ARITH_LEEWAY_OCCUPIED_BITS * single_arena_size(radix));
-        ASSERT_ELSE_PERROR(mprotect(occupied_base, single_arena_size(radix), PROT_READ|PROT_WRITE) == 0);
+        if (is_suggestion)
+            ASSERT_ELSE_PERROR(mprotect(occupied_base, single_arena_size(radix), PROT_READ|PROT_WRITE) == 0);
 
         assert((uintptr_t) aritharea_base % single_arena_size(radix) == 0);
         assert((uintptr_t) occupied_base % single_arena_size(radix) == 0);
@@ -170,10 +182,14 @@ struct NOOBArena {
         // calculate the address of the block at this idx
         auto ptr = ((uintptr_t) occupied_base) + idx * block_size(radix);
         assert(extract_radix(ptr) == radix);
-        
+
+#if TAG_POINTERS
         // embed the lowestMSBs in the top bits now
-        auto mask = static_cast<uint64_t>(extract_inpointertag(ptr)) << (64 - TAG_WIDTH);
-        ptr ^= mask;
+        auto iptag = extract_inpointertag(ptr);
+        assert(iptag <= TAG_T_MAX);
+        auto topmask = static_cast<uint64_t>(iptag) << (64 - TAG_WIDTH);
+        ptr |= topmask;
+#endif
         return (void*) ptr;
     }
 
@@ -199,7 +215,7 @@ struct NOOBArena {
 };
 
 struct NOOBSizeAllocator {
-    // quick lookup during `free`
+    // quick lookup during `free`: map arena_idx to arena
     std::map<uintptr_t, NOOBArena> arenas;
     // if there are any free arenas, they will be in the back here
     //  requires `arenas` iterators to be stable
@@ -214,6 +230,8 @@ struct NOOBSizeAllocator {
         void* suggested_base = (void*) size_region_base(radix);
         for (auto& [_, arena] : arenas) 
             suggested_base = (void*) ((uintptr_t) arena.occupied_base + single_arena_size(radix));
+        // for non-0x1000-aligned single_arena bases, align up
+        suggested_base = __builtin_align_up(suggested_base, 0x1000);
 
         if (extract_radix((uintptr_t) suggested_base) != radix)
             suggested_base = (void*) size_region_base(radix);
@@ -237,13 +255,32 @@ struct NOOBSizeAllocator {
             return {arenas_with_free_entries.back(), false};
 
         // there are no free entries in any of the arenas, create a new one
-        NOOBArena arena{radix, figure_out_a_good_base_suggestion()};
-        // i have to explicitly compute this upfront since there is no standard function argument evaluation order
-        auto arena_idx = arena.idx_in_containing_size_region(); 
-        auto [it, inserted] = arenas.try_emplace(arena_idx, std::move(arena));
-        assert(inserted);
-        arenas_with_free_entries.push_back(it);
-        return {it, true};
+        //  sometimes, we have to create more than one arena here to fill the minimum amount of memory we get from the OS
+        auto new_arenas_to_create = 1;
+        auto multiarena_base = (uint8_t*) figure_out_a_good_base_suggestion();
+        bool multiarena = single_arena_size(radix) < 0x1000;
+        if (multiarena) {
+            assert(0x1000 % single_arena_size(radix) == 0);
+            new_arenas_to_create = 0x1000/single_arena_size(radix);
+            multiarena_base = (uint8_t*) mmap_arena_aritharea(radix, 0x1000, figure_out_a_good_base_suggestion());
+            ASSERT_ELSE_PERROR(mprotect(multiarena_base, 0x1000, PROT_READ|PROT_WRITE) == 0);
+        }
+
+        // iterate through the arena space. for non-multiarenas, this loop executes just once
+        do {
+            new_arenas_to_create--;
+            void* base = multiarena_base + new_arenas_to_create * single_arena_size(radix);
+
+            NOOBArena arena{radix, base, !multiarena};
+            // i have to explicitly compute this upfront since there is no standard function argument evaluation order
+            auto arena_idx = arena.idx_in_containing_size_region(); 
+            auto [it, inserted] = arenas.try_emplace(arena_idx, std::move(arena));
+            assert(inserted);
+            arenas_with_free_entries.push_back(it);
+
+        } while (new_arenas_to_create);
+        
+        return {arenas_with_free_entries.back(), true};
     }
 
     void* allocate() {
@@ -291,29 +328,39 @@ struct NOOBSizeAllocator {
     }
 };
 
+// if we are linking into a hardened program, this function will be defined by the NOOB compiler
+extern "C" void noob_initialize_noobstacks() __attribute__((weak));
+
 struct NOOBAllocator {
     std::vector<NOOBSizeAllocator> per_size_allocators;
-    bool* const hooked;
     // determines maximum allocation size
     const uint8_t max_radix;
-    const uint8_t min_radix = 4;
+    const uint8_t min_radix = std::max(4, NOOB_MIN_RADIX);
 
-    NOOBAllocator(uint8_t max_radix, bool* hooked) :
-        hooked{hooked},
+    NOOBAllocator(uint8_t max_radix) :
         max_radix{max_radix}
     {
+        fprintf(stderr, "Initializing NOOB...\n");
+        
+        if (noob_initialize_noobstacks) // the function exists. we are linked into a hardened NOOB program
+            noob_initialize_noobstacks();
+
+#if __aarch64__
         // start by enabling the tagged address ABI
         if (prctl(PR_SET_TAGGED_ADDR_CTRL, PR_TAGGED_ADDR_ENABLE, 0, 0, 0, 0) == -1)
             perror("enable tagged address kernel abi");
-        assert(max_radix > min_radix && max_radix < (42 - TAG_WIDTH));
+#endif // on x86-64, there is no kernel interface yet. Use enable-UAI.sh to enable UAI system-wide. 
+        assert(max_radix > min_radix && max_radix < NON_NOOB_MIN_RADIX && max_radix <= (42 - TAG_WIDTH));
         for (uint8_t radix = min_radix; radix <= max_radix; radix++) {
             per_size_allocators.push_back(NOOBSizeAllocator{radix});
         }
+
+        hooked = true;
     }
 
     ~NOOBAllocator() {
         // ensure that our deallocation will not trigger a bunch of recursive `free` invocations
-        *hooked = false;
+        hooked = false;
     }
 
     NOOBSizeAllocator& getSizeAllocatorForRadix(uint8_t radix) {
@@ -333,9 +380,11 @@ struct NOOBAllocator {
 
     void free(void* ptr) {
         auto radix = extract_radix((uintptr_t) ptr);
+#if TAG_POINTERS
         // now for a quick security check
         // check that it is still pointing to the original alloc
         assert(extract_inpointertag((uintptr_t) ptr) == extract_toptag((uintptr_t) ptr));
+#endif
         // check that it is pointing to the base of the alloc
         assert(extract_offset((uintptr_t) ptr) == 0);
 
@@ -358,27 +407,23 @@ struct NOOBAllocator {
     }
 };
 
-std::optional<NOOBAllocator> noob_allocator = std::nullopt;
-
-void noob_init(size_t max_radix, bool* hooked) {
-    assert(!noob_allocator.has_value() && "NOOB is already initialized!");
-    noob_allocator.emplace(max_radix, hooked);
-}
+// never dealloc
+NOOBAllocator* noob_allocator = new NOOBAllocator(std::max(34, NON_NOOB_MIN_RADIX - 1));
 
 void* noob_malloc(size_t nbytes) {
-    assert(noob_allocator.has_value());
+    assert(!hooked);
     return noob_allocator->allocate(nbytes);
 }
 
 void noob_free(void* ptr) {
-    assert(noob_allocator.has_value());
+    assert(!hooked);
     if (!ptr)
         return;
     noob_allocator->free(ptr);
 }
 
 void* noob_realloc(void* oldptr, size_t newsize) {
-    assert(noob_allocator.has_value());
+    assert(!hooked);
     if (!oldptr)
         return noob_allocator->allocate(newsize);
     if (!newsize) {
@@ -389,7 +434,7 @@ void* noob_realloc(void* oldptr, size_t newsize) {
 }
 
 void* noob_memalign(size_t alignment, size_t size) {
-    assert(noob_allocator.has_value());
+    assert(!hooked);
     if (!size)
         return NULL;
     assert(std::popcount(alignment) == 1); // pow2. might fail if 0
@@ -398,22 +443,27 @@ void* noob_memalign(size_t alignment, size_t size) {
 }
 
 void* noob_calloc(size_t nbytes) {
-    assert(noob_allocator.has_value());
+    assert(!hooked);
     return noob_allocator->zalloc(nbytes);
 }
 
 size_t noob_usable_size(void* ptr) {
+    assert(!hooked);
     auto radix = extract_radix((uintptr_t) ptr);
     return 1ULL << radix;
 }
 
 static uintptr_t noob_embed_inpointer_tag(uintptr_t ptr, uint8_t top_tag) {
-    uintptr_t oldptr = ptr;
-    uint64_t mask = top_tag;
     auto radix = extract_radix(ptr);
-    ptr &= (~0ULL << (radix + TAG_WIDTH));
-    mask <<= radix;
-    ptr |= mask;
+    auto offset = ptr & ((1ULL << radix) - 1);
+
+    ptr >>= radix;
+    ptr &= ~static_cast<uint64_t>(TAG_T_MAX);
+    assert(top_tag < NUM_BLOCKS_IN_ARENA);
+    ptr |= top_tag;
+    ptr <<= radix;
+    ptr |= offset;
+
     return ptr;
 }
 
@@ -422,7 +472,7 @@ static void check_ptr_arithmetic(void* ptr, void* base) {
     auto ptrint = (uintptr_t) ptr;
 
     auto radix = extract_radix(baseint);
-    auto mask_invariant_bits = (~0ULL << (radix + TAG_WIDTH + ARITH_LEEWAY_WIDTH));
+    auto mask_invariant_bits = (~static_cast<uint64_t>(TAG_T_MAX)) << (ARITH_LEEWAY_WIDTH + radix);
     auto arith_area_size = ~mask_invariant_bits;
     auto aritharea_base = baseint & mask_invariant_bits;
     auto offset = ptrint - aritharea_base;
@@ -430,7 +480,7 @@ static void check_ptr_arithmetic(void* ptr, void* base) {
         fprintf(stderr, "\n\nOut of bounds arithmetic detected!!\n");
         noob_print_ptr("ptr", ptr);
         noob_print_ptr("base", base);
-        fprintf(stderr, "aritharea of base is [%p, %p[ (size: %llu)\n", (void*) aritharea_base, (void*) (aritharea_base + arith_area_size), arith_area_size);
+        fprintf(stderr, "aritharea of base is [%p, %p[ (size: %lu)\n", (void*) aritharea_base, (void*) (aritharea_base + arith_area_size), arith_area_size);
         fprintf(stderr, "offset of ptr in aritharea is %ld\n", static_cast<intptr_t>(offset));
     }
     assert(offset < arith_area_size);
@@ -441,8 +491,9 @@ extern "C" {
 void noob_allocate_stacks(void** stack_array, uint8_t lowest_radix, uint8_t highest_radix) {
     fprintf(stderr, "Allocating NOOB stacks between %d and %d...\n", lowest_radix, highest_radix);
     assert(highest_radix >= lowest_radix);
-    assert(lowest_radix >= 3 && "We don't map noobstacks for stack objects too small");
-    assert(highest_radix < std::bit_width(NOOB_STACK_SIZE) && "We don't map noobstacks for objects > NOOB_STACK_SIZE");
+    assert(lowest_radix >= std::max(3, NOOB_MIN_RADIX) && "We don't map noobstacks for stack objects too small");
+    assert((1U << highest_radix) < NOOB_STACK_SIZE && "We don't map noobstacks for objects > NOOB_STACK_SIZE");
+    assert(highest_radix < NON_NOOB_MIN_RADIX);
     for (uint radix = lowest_radix; radix <= highest_radix; radix++) {
         // let's try to map this immediately at the start of the size region
         auto stack = mmap_arena_aritharea(radix, NOOB_STACK_SIZE, (void*) size_region_base(radix));
@@ -463,8 +514,11 @@ void noob_access_check(void* ptr, void* base, bool checkDeref, bool checkArith) 
         return;
 
     auto radix = extract_radix((uintptr_t) base);
-    auto embedded_tag = ((uintptr_t) ptr >> radix) & ((1ULL << TAG_WIDTH) - 1);
-    auto top_tag = ((uintptr_t) ptr >> (64 - TAG_WIDTH));
+    auto embedded_tag = extract_inpointertag((uintptr_t) ptr);
+    auto top_tag = extract_toptag((uintptr_t) ptr);
+
+    if (radix >= NON_NOOB_MIN_RADIX) // ignore uninstrumented pointers
+        return;
     
     if (embedded_tag != top_tag) {
         fprintf(stderr, "\n\nDereference check failed!!\n");
@@ -472,11 +526,14 @@ void noob_access_check(void* ptr, void* base, bool checkDeref, bool checkArith) 
         if (base != ptr)
             noob_print_ptr("base", base);
 
+        if (noob_is_nonnoob((uintptr_t) ptr) && noob_is_nonnoob((uintptr_t) base)) 
+            asm("int3");
+
         auto likely_base = noob_embed_inpointer_tag((uintptr_t) ptr, top_tag);
         fprintf(stderr, "likely OOB offset %ld into object at %p (size %lu)\n", ((uintptr_t)ptr) - likely_base, noob_striptop((void*) likely_base), 1UL << radix);
 
-        fprintf(stderr, "embedded_tag: %llu\n", embedded_tag);
-        fprintf(stderr, "top_tag: %lu\n", top_tag);
+        fprintf(stderr, "embedded_tag: %u\n", embedded_tag);
+        fprintf(stderr, "top_tag: %u\n", top_tag);
     }
     assert(embedded_tag == top_tag);
 

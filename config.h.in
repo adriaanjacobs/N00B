@@ -1,13 +1,14 @@
 #pragma once
 
-#define TAG_WIDTH                   (${TAG_WIDTH})
-static_assert(TAG_WIDTH == 8, "we make this assumption almost everywhere in the source at this point");
+#define TAG_WIDTH                    (${TAG_WIDTH})
+#define NOOB_MIN_RADIX              (${NOOB_MIN_RADIX})
+#define NON_NOOB_MIN_RADIX           (${NON_NOOB_MIN_RADIX})
+
 #define ARITH_LEEWAY_WIDTH          (${ARITH_LEEWAY_WIDTH})
 static_assert(ARITH_LEEWAY_WIDTH == 0, "we don't need to permit additional arithmetic");
 #define ARITH_LEEWAY_OCCUPIED_BITS  (${ARITH_LEEWAY_OCCUPIED_BITS})
 static_assert(ARITH_LEEWAY_OCCUPIED_BITS < (1U << ARITH_LEEWAY_WIDTH));
 #define NOOB_STACK_SIZE             (${NOOB_STACK_SIZE})
-#define NOOB_COMPAT_MIN_ADDR        (${NOOB_COMPAT_MIN_ADDR})
 
 #define CHECK_DEREFERENCE_SITES     ${CHECK_DEREFERENCE_SITES}
 #define CHECK_ESCAPE_SITES          ${CHECK_ESCAPE_SITES}

@@ -1,15 +1,27 @@
-set(TAG_WIDTH                   8)
+# N00B config file. Defaults are set for reproducible performance evaluation, across both x86 and ARM
+
+# encode platform differences here
+if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+    set(TAG_WIDTH                7)
+    # minimum 16B allocations
+    set(NOOB_MIN_RADIX          0x4)
+    # maximum 16GB allocations
+    set(NON_NOOB_MIN_RADIX       35)
+elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+    set(TAG_WIDTH                8)
+    # no minimum allocation size
+    #   the implementation may enforce additional minima for performance/simplicity
+    #   but this setting guarantees that the actual radix will be encoded natively in the pointer
+    set(NOOB_MIN_RADIX          0x0)
+    # allocator may enforce lower limits (e.g. 34), but mapping non-noob above this
+    #   ensures that it is transparently ignored by our instrumentation, without explicit masking
+    set(NON_NOOB_MIN_RADIX       47)
+else()
+    message(FATAL_ERROR "Unsupported architecture: ${CMAKE_SYSTEM_PROCESSOR}")
+endif()
 set(ARITH_LEEWAY_WIDTH          0)
 set(ARITH_LEEWAY_OCCUPIED_BITS  0b00)
 set(NOOB_STACK_SIZE             0x400000ULL) # bzip2 needs large objects on the stack!
-math(EXPR
-    # minimum address of non-NOOB managed memory. 
-    # maximum address of NOOB-managed memory (in practice: (42 - TAG_WIDTH - ARITH_LEEWAY_WIDTH) << 42)
-    # should be small enough to leave room for non-NOOB managed memory
-    #   i.e. definitely smaller than 0x800000000000 (radix: 32)
-    #   with TAG_WIDTH=8, this means ARITH_LEEWAY_WIDTH should be at least 
-    NOOB_COMPAT_MIN_ADDR        "(64 - ${TAG_WIDTH} - ${ARITH_LEEWAY_WIDTH}) << 42" 
-OUTPUT_FORMAT HEXADECIMAL)
 
 set(CHECK_DEREFERENCE_SITES     1)
 set(CHECK_ESCAPE_SITES          1)

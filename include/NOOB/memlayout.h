@@ -5,10 +5,12 @@
 #include <stdint.h>
 #include <unistd.h>
 
-#define NUM_BLOCKS_IN_ARENA (1ULL << TAG_WIDTH)
-
-inline uintptr_t size_region_base(uint8_t radix) { 
-    return ((size_t) radix) << 42; 
+inline uintptr_t size_region_base(uint8_t radix) {
+    auto region_base = ((size_t) radix - NOOB_MIN_RADIX) << 42;
+    // protect against mapping on the zero page
+    if (region_base < 0x800000)
+        region_base = 0x800000;
+    return region_base;
 }
 
 inline size_t size_region_size() {
@@ -20,16 +22,20 @@ inline size_t block_size(uint8_t radix) {
 }
 
 inline size_t single_arena_size(uint8_t radix) {
-    return NUM_BLOCKS_IN_ARENA * block_size(radix);
+    return (1U << TAG_WIDTH) * block_size(radix);
+}
+
+inline size_t arith_area_size(uint8_t radix) {
+    return single_arena_size(radix) << ARITH_LEEWAY_WIDTH;
 }
 
 inline uint8_t extract_radix(uintptr_t ptr) {
-    return (ptr >> 42) & 0b0011'1111;
+    return ((ptr >> 42) + NOOB_MIN_RADIX) & UINT8_MAX;
 }
 
 inline uint8_t extract_inpointertag(uintptr_t ptr) {
     auto radix = extract_radix(ptr);
-    return (ptr >> radix) & (~0ULL >> (64 - TAG_WIDTH));
+    return (ptr >> radix) & ((1U << TAG_WIDTH) - 1);
 }
 
 inline uint8_t extract_toptag(uintptr_t ptr) {
@@ -40,11 +46,4 @@ inline size_t extract_offset(uintptr_t ptr) {
     auto radix = extract_radix(ptr);
     auto mask = (1ULL << radix) - 1;
     return ptr & mask;
-}
-
-inline size_t extract_highestMSBs(uintptr_t ptr) {
-    auto radix = extract_radix(ptr);
-    ptr &= (~0ULL >> TAG_WIDTH); // clear the top bits
-    ptr >>= radix + TAG_WIDTH; // shift away the offset + lowestMSBs
-    return ptr;
 }

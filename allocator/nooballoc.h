@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+extern bool hooked;
+
 template<typename T>
 T* noob_striptop(T* ptr) {
     return (T*) ((uintptr_t) ptr & (~0ULL >> TAG_WIDTH)); 
