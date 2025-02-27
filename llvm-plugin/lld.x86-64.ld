@@ -1,26 +1,17 @@
 R"(
 
-/* Script for -z combreloc -z separate-code */
-/* Copyright (C) 2014-2024 Free Software Foundation, Inc.
+/* Script for -z combreloc */
+/* Copyright (C) 2014-2022 Free Software Foundation, Inc.
    Copying and distribution of this script, with or without modification,
    are permitted in any medium without royalty provided the copyright
    notice and this notice are preserved.  */
-OUTPUT_FORMAT("elf64-x86-64")
+OUTPUT_FORMAT("elf64-x86-64", "elf64-x86-64", "elf64-x86-64")
 OUTPUT_ARCH(i386:x86-64)
 ENTRY(_start)
-SEARCH_DIR("=/usr/local/lib/x86_64-linux-gnu");
-SEARCH_DIR("=/lib/x86_64-linux-gnu");
-SEARCH_DIR("=/usr/lib/x86_64-linux-gnu");
-SEARCH_DIR("=/usr/local/lib64");
-SEARCH_DIR("=/lib64");
-SEARCH_DIR("=/usr/lib64");
-SEARCH_DIR("=/usr/local/lib");
-SEARCH_DIR("=/lib");
-SEARCH_DIR("=/usr/lib");
-SEARCH_DIR("=/usr/x86_64-linux-gnu/lib64");
-SEARCH_DIR("=/usr/x86_64-linux-gnu/lib");
-SEARCH_DIR("=/usr/x86_64-pc-linux-gnu/lib64");
-SEARCH_DIR("=/usr/x86_64-pc-linux-gnu/lib");
+SEARCH_DIR("/usr/x86_64-pc-linux-gnu/lib64"); 
+SEARCH_DIR("/usr/lib"); 
+SEARCH_DIR("/usr/local/lib"); 
+SEARCH_DIR("/usr/x86_64-pc-linux-gnu/lib");
 
 PHDRS {
   headers PT_PHDR PHDRS ;
@@ -39,9 +30,10 @@ PHDRS {
   debug PT_NOTE ;
 }
 
+
 SECTIONS {
-  PROVIDE (__executable_start = SEGMENT_START("text-segment", ${NOOB_COMPAT_MIN_ADDR}));
-  . = SEGMENT_START("text-segment", ${NOOB_COMPAT_MIN_ADDR}) + SIZEOF_HEADERS;
+  PROVIDE (__executable_start = SEGMENT_START("text-segment", 0x40000));
+  . = SEGMENT_START("text-segment", 0x40000) + SIZEOF_HEADERS;
 
   .interp         : { *(.interp) } :interp :brol
 
@@ -78,6 +70,8 @@ SECTIONS {
     PROVIDE_HIDDEN (__rela_iplt_end = .);
   }
   .relr.dyn : { *(.relr.dyn) }
+
+  . = unmanaged_start;
 
   . = ALIGN(CONSTANT (MAXPAGESIZE));
   .init           : {
@@ -219,10 +213,10 @@ SECTIONS {
     *(.ldata .ldata.* .gnu.linkonce.l.*)
     . = ALIGN(. != 0 ? 64 / 8 : 1);
   }
-
   . = ALIGN(64 / 8);
   _end = .; PROVIDE (end = .);
   . = DATA_SEGMENT_END (.);
+
   /* Stabs debugging sections.  */
   .stab          0 : { *(.stab) } :debug
   .stabstr       0 : { *(.stabstr) }
@@ -272,5 +266,35 @@ SECTIONS {
   .gnu.attributes 0 : { KEEP (*(.gnu.attributes)) }
   /DISCARD/ : { *(.note.GNU-stack) *(.gnu_debuglink) *(.gnu.lto_*) }
 }
+
+
+/* Compile with:
+  clang --rtlib=compiler-rt -fuse-ld=lld -O2 -no-pie -mcmodel=large -T x86_64.ld test.ll -o test.noob
+            ↳ this is where we kick out libgcc so it has spare time to burn in hell😈
+*/
+
+/*
+  Start of noob-unmanaged memory 
+  We move all relevant code and non-noob data sections to unmanaged memory so external code compiled for 
+  the small code model can still access its data when it is placed at world's end.
+*/
+unmanaged_start = (${NON_NOOB_MIN_RADIX}-${NOOB_MIN_RADIX})<<42;
+
+/*
+  Noob-managed globals
+*/
+/*
+SECTIONS {
+  . = 1<<43;
+  .noob_globals_radix4 : { *(.noob_globals_radix4) } : noob_globals_radix4
+  . = 2<<44;
+  .noob_globals_radix5 : { *(.noob_globals_radix5) } : noob_globals_radix5
+}
+
+PHDRS {
+  noob_globals_radix4 PT_LOAD FLAGS(0x6);
+  noob_globals_radix5 PT_LOAD FLAGS(0x6);
+}
+*/
 
 )"

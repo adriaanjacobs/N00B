@@ -19,6 +19,7 @@
 #include <llvm/Analysis/StackSafetyAnalysis.h>
 #include <llvm/Transforms/IPO/AlwaysInliner.h>
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
+#include <llvm/Transforms/Utils/InstructionNamer.h>
 
 #include <sstream>
 
@@ -44,13 +45,13 @@ std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> NOOBInstrumentation
         ASSERT_ELSE_UNKOWN(!global.hasCommonLinkage(), &global);
         unsigned long alignTo = module.getDataLayout().getTypeAllocSize(global.getValueType()).getFixedSize();
         // enforce a minimum alignment for globals that have no alignment, a too small alignment, a too small size, or a combination
-        alignTo = std::max(alignTo, global.getAlign().hasValue() ? global.getAlign()->value() : 16);
-        if (alignTo < 16)
-            alignTo = 16;
+        constexpr size_t noob_min_size = std::max(1UL << NOOB_MIN_RADIX, 8UL); // minimum 8 regardless
+        alignTo = std::max(alignTo, global.getAlign().hasValue() ? global.getAlign()->value() : noob_min_size);
+        if (alignTo < noob_min_size)
+            alignTo = noob_min_size;
         auto radix = std::bit_width(alignTo - 1);
         // fucking sjeng has a 2MB global for fucks sake
-        // that's a 1GB arena, with two reserves around it :(((((
-        // fuck that shit bro
+        // that's a 1GB arena :(((((
         ASSERT_ELSE_UNKOWN(radix < 25, &global); // idk why we'd need globals larger than this
         global.setAlignment(llvm::Align{(1ULL << radix)});
         radixToGlobals[radix].push_back(&global);
@@ -74,20 +75,22 @@ void NOOBInstrumentationPass::extendNOOBLinkerScript(std::string& noobLinkerScri
     sections << "\nSECTIONS {\n";
     for (auto& [radix, globals] : radixToGlobals) {
         assert(radix < 25); // idk why we'd need globals larger than this
-        if (TAG_WIDTH <= 8)
-            assert(radix >= 4); // otherwise we have to update the linker script to avoid non-page aligned memory regions for TAG_WIDTH=8
         assert(std::popcount(single_arena_size(radix)) == 1);
         auto needed_size =  (1ULL << radix) * globals.size();
         auto num_occupied_arenas = __builtin_align_up(needed_size, single_arena_size(radix)) / single_arena_size(radix);
         // always start and end with a reserved region
         auto needed_arenas = 1 + num_occupied_arenas * 2;
         // layout is: reserved | repeat [occupied | reserved]
+        auto base_address = size_region_base(radix);
         for (uint i = 0; i < needed_arenas; i++) {
             std::string suffix = "RESERVED";
             bool isReserved = i % 2 == 0; // odd index means occupied
             if (!isReserved) 
                 suffix = "OCCUPIED";
-            auto base_address = size_region_base(radix) + i * single_arena_size(radix);
+            base_address += single_arena_size(radix);
+            if (!isReserved)
+                assert(base_address % arith_area_size(radix) == 0); // optimized arithchecks expect this
+            assert(base_address % 0x1000UL == 0); // should be page-aligned. otherwise just align it up I guess
             auto segmentName = llvm::formatv("noob_globals_radix{0}_{1}_{2}", radix, i, suffix).str();
             segmentNames.push_back(segmentName);
             sections << llvm::formatv("  . = SEGMENT_START(\"{0}\", {1:x});\n", segmentName, base_address).str();
@@ -97,7 +100,7 @@ void NOOBInstrumentationPass::extendNOOBLinkerScript(std::string& noobLinkerScri
         sections << "\n";
 
         for (uint i = 0; i < globals.size(); i++) {
-            auto arena_idx = i / (1ULL << TAG_WIDTH);
+            auto arena_idx = i / (1U << TAG_WIDTH);
             auto memory_idx = 1 + arena_idx*2; // always odd
 
             auto global = globals[i];
@@ -267,13 +270,11 @@ llvm::Value* NOOBInstrumentationPass::computeRadix(llvm::Value* ptrAsInt, llvm::
         "", 
         insertBefore
     );
-    // it seems like this below does not end up in machine code with bmi2's shrx, because it automatically masks to qword width
-    return llvm::BinaryOperator::CreateAnd(
-        radix, 
-        llvm::ConstantInt::get(int64Ty, llvm::APInt{64, 0b0011'1111}), 
-        "", 
-        insertBefore
-    );
+    // mask out the top tag
+    radix = llvm::BinaryOperator::CreateAnd(radix, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, 0xFF}), "", insertBefore);
+    // decode the in-pointer radix value into a logical one
+    radix = llvm::BinaryOperator::CreateAdd(radix, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, NOOB_MIN_RADIX}), "", insertBefore);
+    return radix;
 }
 
 llvm::Value* NOOBInstrumentationPass::computeSafeInArithAreaPtr(llvm::Value* ptr, llvm::Value* arithAreaSize, llvm::Value* arithAreaBase, llvm::Value* trackedBase, llvm::Instruction* insertBefore) {
@@ -291,7 +292,7 @@ llvm::Value* NOOBInstrumentationPass::computeSafeInArithAreaPtr(llvm::Value* ptr
     return provenancedSafePtr;
 }
 
-llvm::Value* NOOBInstrumentationPass::computeInPointerTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore) {
+llvm::Value* NOOBInstrumentationPass::shiftDownTillInPointerTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore) {
     auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
     auto ptrAsInt = createBitOrPointerCastIfNecessary(ptr, int64Ty, "", insertBefore);
     return llvm::BinaryOperator::CreateLShr(ptrAsInt, radix, "iptag", insertBefore);
@@ -299,7 +300,7 @@ llvm::Value* NOOBInstrumentationPass::computeInPointerTag(llvm::Value* ptr, llvm
 
 llvm::Value* NOOBInstrumentationPass::computeInPointerTagMask(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore) {
     auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
-    auto inPointerTag = computeInPointerTag(ptr, radix, insertBefore);
+    auto inPointerTag = shiftDownTillInPointerTag(ptr, radix, insertBefore);
     return llvm::BinaryOperator::CreateShl(inPointerTag, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH}), "", insertBefore);
 }
 
@@ -319,7 +320,7 @@ llvm::Value* NOOBInstrumentationPass::computePoisonMaskAtDerefSite(const CheckIn
         //  implement optimized instrumentation here, that checks arith & deref at once
         auto topTag = computeTopTag(baseAsInt, radix, insertBefore);
         auto origObj = llvm::BinaryOperator::CreateLShr(baseAsInt, radix, "", insertBefore);
-        origObj = llvm::BinaryOperator::CreateAnd(origObj, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, ~((1ULL << TAG_WIDTH) - 1)}), "", insertBefore); // clear bottom TAG_WIDTH bits
+        origObj = llvm::BinaryOperator::CreateAnd(origObj, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, ~((1ULL << TAG_WIDTH) - 1)}), "", insertBefore); // clear iptag bits
         origObj = llvm::BinaryOperator::CreateOr(origObj, topTag, "", insertBefore);
         auto ptrAsInt = castToInt64Ty(checkInfo.pointerOperand, insertBefore);
         auto currentObj = llvm::BinaryOperator::CreateLShr(ptrAsInt, radix, "", insertBefore);
@@ -332,28 +333,40 @@ llvm::Value* NOOBInstrumentationPass::computePoisonMaskAtDerefSite(const CheckIn
             // isInBounds = isInBounds && endOfRangeInBounds
             isInBounds = llvm::SelectInst::Create(isInBounds, endOfRangeInBounds, isInBounds, "", insertBefore);
         }
-        auto poisonMask = llvm::SelectInst::Create(isInBounds, llvm::ConstantInt::getNullValue(int64Ty), llvm::ConstantInt::get(int64Ty, llvm::APInt{64, (1ULL << (64 - TAG_WIDTH - TAG_WIDTH))}), "", insertBefore);
+        llvm::Instruction* poisonMask = llvm::SelectInst::Create(isInBounds, llvm::ConstantInt::getNullValue(int64Ty), llvm::ConstantInt::get(int64Ty, llvm::APInt{64, (1ULL << 48)}), "", insertBefore);
+        if (NON_NOOB_MIN_RADIX < 48) { // if >= 48, the iptag will be 0
+            // the below essentially does: mask = radix > MAX_RADIX ? 0x0 : ~0x0
+            // but without the conditional evaluation
+            //  subtract the minimum "radix" of non-noob memory
+            auto mask = llvm::BinaryOperator::CreateSub(radix, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, NON_NOOB_MIN_RADIX}), "", insertBefore);
+            //  if radix <= MAX_RADIX, the high bits will be set. Arithmetic shift out the low bits to create an all-ones mask
+            //  if radix > MAX_RADIX, the high bits will be zero. Arithmetic shift out the low bits to create an all-zero mask
+            mask = llvm::BinaryOperator::CreateAShr(mask, llvm::Constant::getIntegerValue(int64Ty, {64, 8}), "", insertBefore);
+            // apply the mask to the poisonMask: radix > MAX_RADIX generates a 0 poison mask
+            poisonMask = llvm::BinaryOperator::CreateAnd(poisonMask, mask, "", insertBefore);
+        }
         return poisonMask;
     } else {
         // rarer case: we only check deref, because arith got pruned
         //  implement an even more optimized version here that solely checks deref
         // find the in pointer tag and top tag
         const auto topTag = computeTopTag(checkInfo.trackedBase, radix, insertBefore);
-        auto inPointerTag = computeInPointerTag(checkInfo.pointerOperand, radix, insertBefore);
+        auto inPointerTag = shiftDownTillInPointerTag(checkInfo.pointerOperand, radix, insertBefore);
         // xor the iptag with the toptag
         auto isNotInBounds = llvm::BinaryOperator::CreateXor(inPointerTag, topTag, "notinbounds", insertBefore);
         if (checkInfo.isRangeCheck()) {
-            auto endOfAddrIpTag = computeInPointerTag(checkInfo.endOfAddressRange, radix, insertBefore);
+            auto endOfAddrIpTag = shiftDownTillInPointerTag(checkInfo.endOfAddressRange, radix, insertBefore);
             auto endOfAddrNotInBounds = llvm::BinaryOperator::CreateXor(endOfAddrIpTag, topTag, "notinbounds", insertBefore);
             // isNotInBounds = isNotInBounds || endOfAddrNotInBounds
             isNotInBounds = llvm::BinaryOperator::CreateOr(isNotInBounds, endOfAddrNotInBounds, "notinbounds", insertBefore);
-            // we're going to feed this value into a loop, where it could escape
-            //  make sure that our later XOR preserves the correct top bits in the pointer
-            //  clear the top bits
-            isNotInBounds = llvm::BinaryOperator::CreateAnd(isNotInBounds, llvm::ConstantInt::getIntegerValue(int64Ty, {64, (1UL << TAG_WIDTH) - 1}), "", insertBefore);
+            // we're going to use this mask to embed poison bits into a pointer that we feed into a loop
+            //  make sure that we're not inadvertently overwriting the top bits during the masking
+            //  clear the garbage top bits in this mask
+            isNotInBounds = llvm::BinaryOperator::CreateAnd(isNotInBounds, llvm::ConstantInt::getIntegerValue(int64Ty, {64, (1U << TAG_WIDTH) - 1}), "", insertBefore);
         }
-        // place the resulting value in the |top bits|_here_|radix|rest of pointer ...|
-        //  it's (generally) not a problem that the more significant bits of the `poisonMask` value likely aren't 0 here, they will get ignored by TBI anyway
+        //                          64      56/57   48    42                   0 
+        // place the resulting value |top bits|_here_|radix|rest of pointer ...|
+        //  it's not a problem that the more significant bits of the `poisonMask` value likely aren't 0 here, they will get ignored by TBI/UAI anyway
         //  this would only be a problem for range checks, where the pointer value could escape, but we zero out the top bits of isNotInBounds for that reason
         auto poisonMask = llvm::BinaryOperator::CreateShl(isNotInBounds, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH - TAG_WIDTH}), "", insertBefore);
         return poisonMask;
@@ -518,7 +531,8 @@ void NOOBInstrumentationPass::moveUnsafeAllocasToNOOBStacks(llvm::Module& module
                 llvm::errs() << "alignedSizeInBytes = " << alignedSizeInBytes << "\n";
             ASSERT_ELSE_UNKOWN(alignedSizeInBytes <= NOOB_STACK_SIZE, alloca);
 
-            auto radix = std::max(3UL, std::bit_width(alignedSizeInBytes) - 1);
+            auto radix = std::max(3UL, std::bit_width(alignedSizeInBytes) - 1UL);
+            radix = std::max(static_cast<unsigned long>(NOOB_MIN_RADIX), radix);
 
             // keep track of the max and min radix here
             if (radix < lowestRadix)
@@ -642,6 +656,8 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
     // add IR-level debuginfo
     {
         llvm::StripDebugInfo(module); // destroy any existing debug info
+        // auto instNamer = llvm::createModuleToFunctionPassAdaptor(llvm::InstructionNamerPass{});
+        // instNamer.run(module, MAM);
         std::string ltoResultFileName = "LTOresult.noob.ll";
         dumpModuleToFile(module, ltoResultFileName);
         char *cwd = get_current_dir_name();
