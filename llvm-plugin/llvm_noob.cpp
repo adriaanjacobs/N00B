@@ -570,12 +570,14 @@ void NOOBInstrumentationPass::moveUnsafeAllocasToNOOBStacks(llvm::Module& module
                 // i needn't concern myself with marking these as "noalias" here -- we should only do this at the very end of the optimization pipeline
                 // any optimizations that benefit from the aliasing information should have been done by now
 
+#if NOOB_TAG_POINTERS
                 // now put the in-pointer tag in the top tag to make the pointer fully NOOB-compliant
                 offsetStackPtr = castToInt64Ty(offsetStackPtr, alloca);
                 auto radixVal = llvm::ConstantInt::get(int64Ty, {64, radix});
                 auto inPointerTagMask = computeInPointerTagMask(offsetStackPtr, radixVal, alloca);
                 // assuming that offsetStackPtr's top tag is 0 here (which it should be)
                 offsetStackPtr = llvm::BinaryOperator::CreateOr(offsetStackPtr, inPointerTagMask, "", alloca);
+#endif
 
                 auto castedPtr = llvm::CastInst::CreateBitOrPointerCast(offsetStackPtr, alloca->getType(), alloca->getName(), alloca);
                 alloca->replaceAllUsesWith(castedPtr);

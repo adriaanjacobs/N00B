@@ -8,6 +8,7 @@ if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
     # maximum 16GB allocations
     set(NON_NOOB_MIN_RADIX      35)
     set(NOOB_IGNORE_ERRORS      1)
+    set(NOOB_TAG_POINTERS       0)
 elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
     set(TAG_WIDTH               8)
     # no minimum allocation size
@@ -18,6 +19,7 @@ elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
     #   ensures that it is transparently ignored by our instrumentation, without explicit masking
     set(NON_NOOB_MIN_RADIX      47)
     set(NOOB_IGNORE_ERRORS      0)
+    set(NOOB_TAG_POINTERS       1)
 else()
     message(FATAL_ERROR "Unsupported architecture: ${CMAKE_SYSTEM_PROCESSOR}")
 endif()

@@ -47,8 +47,6 @@ struct run_on_destruct {
 #define NUM_BLOCKS_IN_ARENA         (1U << TAG_WIDTH)
 #define TAG_T_MAX                   (NUM_BLOCKS_IN_ARENA - 1)
 
-#define TAG_POINTERS                (!NOOB_IGNORE_ERRORS)
-
 bool noob_is_nonnoob(uintptr_t ptr) {
     return extract_radix(ptr) >= NON_NOOB_MIN_RADIX;
 }
@@ -183,7 +181,7 @@ struct NOOBArena {
         auto ptr = ((uintptr_t) occupied_base) + idx * block_size(radix);
         assert(extract_radix(ptr) == radix);
 
-#if TAG_POINTERS
+#if NOOB_TAG_POINTERS
         // embed the lowestMSBs in the top bits now
         auto iptag = extract_inpointertag(ptr);
         assert(iptag <= TAG_T_MAX);
@@ -400,7 +398,7 @@ struct NOOBAllocator {
 
     void free(void* ptr) {
         auto radix = extract_radix((uintptr_t) ptr);
-#if TAG_POINTERS
+#if NOOB_TAG_POINTERS
         // now for a quick security check
         // check that it is still pointing to the original alloc
         assert(extract_inpointertag((uintptr_t) ptr) == extract_toptag((uintptr_t) ptr));
