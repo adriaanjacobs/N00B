@@ -313,6 +313,7 @@ llvm::Value* NOOBInstrumentationPass::computeTopTag(llvm::Value* ptr, llvm::Valu
 llvm::Value* NOOBInstrumentationPass::computePoisonMaskAtDerefSite(const CheckInfo& checkInfo, llvm::Value* baseAsInt, llvm::Value* radix, llvm::Instruction* insertBefore) {
     auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
     // FIXME: "mbedtls_md5_starts_ret" in benchmark.ll has an example at the top of an unnecessary arith check. why do we have it??
+    assert(checkInfo.shouldCheckDereference()); // this function assumes we're at a deref site, for poisoning
     if (checkInfo.shouldCheckArith()) {
         assert(CHECK_POINTER_ARITHMETIC);
         static_assert(ARITH_LEEWAY_WIDTH == 0, "I did not account for non-zero leeway bits here");
@@ -334,17 +335,6 @@ llvm::Value* NOOBInstrumentationPass::computePoisonMaskAtDerefSite(const CheckIn
             isInBounds = llvm::SelectInst::Create(isInBounds, endOfRangeInBounds, isInBounds, "", insertBefore);
         }
         llvm::Instruction* poisonMask = llvm::SelectInst::Create(isInBounds, llvm::ConstantInt::getNullValue(int64Ty), llvm::ConstantInt::get(int64Ty, llvm::APInt{64, (1ULL << 48)}), "", insertBefore);
-        if (NON_NOOB_MIN_RADIX < 48) { // if >= 48, the iptag will be 0
-            // the below essentially does: mask = radix > MAX_RADIX ? 0x0 : ~0x0
-            // but without the conditional evaluation
-            //  subtract the minimum "radix" of non-noob memory
-            auto mask = llvm::BinaryOperator::CreateSub(radix, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, NON_NOOB_MIN_RADIX}), "", insertBefore);
-            //  if radix <= MAX_RADIX, the high bits will be set. Arithmetic shift out the low bits to create an all-ones mask
-            //  if radix > MAX_RADIX, the high bits will be zero. Arithmetic shift out the low bits to create an all-zero mask
-            mask = llvm::BinaryOperator::CreateAShr(mask, llvm::Constant::getIntegerValue(int64Ty, {64, 8}), "", insertBefore);
-            // apply the mask to the poisonMask: radix > MAX_RADIX generates a 0 poison mask
-            poisonMask = llvm::BinaryOperator::CreateAnd(poisonMask, mask, "", insertBefore);
-        }
         return poisonMask;
     } else {
         // rarer case: we only check deref, because arith got pruned
@@ -413,6 +403,17 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
             assert(CHECK_POINTER_DEREFERENCES);
             assert(CHECK_DEREFERENCE_SITES); // should never deref check escape sites
             auto poisonMask = computePoisonMaskAtDerefSite(*checkInfo, baseAsInt, radix, insertBefore);
+            if (NON_NOOB_MIN_RADIX < 48) { // if >= 48, the iptag will be 0
+                // the below essentially does: mask = radix > MAX_RADIX ? 0x0 : ~0x0
+                // but without the conditional evaluation
+                //  subtract the minimum "radix" of non-noob memory
+                auto mask = llvm::BinaryOperator::CreateSub(radix, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, NON_NOOB_MIN_RADIX}), "", insertBefore);
+                //  if radix <= MAX_RADIX, the high bits will be set. Arithmetic shift out the low bits to create an all-ones mask
+                //  if radix > MAX_RADIX, the high bits will be zero. Arithmetic shift out the low bits to create an all-zero mask
+                mask = llvm::BinaryOperator::CreateAShr(mask, llvm::Constant::getIntegerValue(int64Ty, {64, 8}), "", insertBefore);
+                // apply the mask to the poisonMask: radix > MAX_RADIX generates a 0 poison mask
+                poisonMask = llvm::BinaryOperator::CreateAnd(poisonMask, mask, "", insertBefore);
+            }
             if (checkInfo->isRangeCheck()) {
                 // crucial: make sure the pointer being poisoned later on is the actual start value of the loop
                 //  this can be different than the current pointerOperand, which is simply the lowest value of the accessed range
