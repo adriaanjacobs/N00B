@@ -118,7 +118,7 @@ static void* mmap_arena_aritharea(uint8_t in_pointer_radix, size_t aritharea_siz
     assert(aloc % aritharea_size == 0);
     assert(aloc % single_arena_size(in_pointer_radix) == 0);
     return (void*) aloc;
-}  
+}
 
 struct NOOBArena {
     std::bitset<NUM_BLOCKS_IN_ARENA> free_status;
@@ -337,6 +337,7 @@ struct NOOBAllocator {
     const uint8_t max_radix;
     const uint8_t min_radix = std::max(4, NOOB_MIN_RADIX);
 
+    __attribute__((optnone))
     NOOBAllocator(uint8_t max_radix) :
         max_radix{max_radix}
     {
@@ -349,7 +350,26 @@ struct NOOBAllocator {
         // start by enabling the tagged address ABI
         if (prctl(PR_SET_TAGGED_ADDR_CTRL, PR_TAGGED_ADDR_ENABLE, 0, 0, 0, 0) == -1)
             perror("enable tagged address kernel abi");
-#endif // on x86-64, there is no kernel interface yet. Use enable-UAI.sh to enable UAI system-wide. 
+#endif // on x86-64, there is no kernel interface yet
+
+        // The non-NOOB memory region is mapped at address 2^NON_NOOB_MIN_RADIX -> VA_MAX. Instrumentation ignores these pointers as follows:
+        //  the dereferences checks:
+        //      on x86 UAI: will explicitly ignore pointers with that radix
+        //      on AArch64: will implicitly ignore those pointers because the NON_NOOB_MIN_RADIX is 48, which means that the "in-pointer tag" will be read as 0 from the upper bits, and the toptag too.
+        //  the arithmetic check will "transparently" do so, based on the assumption that non-noob memory object are supposedly "huge" (i.e. 2^NON_NOOB_MIN_RADIX bytes), and allocated in arenas that are 2^TAG_WIDTH * 2^NON_NOOB_MIN_RADIX bytes large
+        //      the idea is that arithmetic on those is unlikely to escape the arena boundaries. Arena boundaries exist at multiples of 2^TAG_WIDTH * 2^NON_NOOB_MIN_RADIX
+        //          on AArch64 systems, this is 2^8 * 2^48 = 2^56 bytes, which is larger than the entire virtual address space (2^48) -> no real arithmetic restrictions. 
+        //          on UAI x86 systems, this is 2^7 * 2^35 = 2^42 bytes, which is the size of a size region -> we will effectively restrict arithmetic to within the size region boundaries. 
+        //              to ensure that this does not cause issues for non-noob-managed memory that is allocated near these boundaries, we map a page at the start and end of the non-noob-managed memory region
+        {
+            auto compat_guard_start = mmap((void*)size_region_base(NON_NOOB_MIN_RADIX), 0x1000, PROT_NONE, MAP_FIXED_NOREPLACE|MAP_ANON|MAP_PRIVATE|MAP_NORESERVE, -1, 0);
+            if (compat_guard_start == MAP_FAILED)
+                ASSERT_ELSE_PERROR(errno == EEXIST);
+            auto compat_guard_end = mmap((void*)(size_region_base(NON_NOOB_MIN_RADIX) + size_region_size() - 0x2000), 0x1000, PROT_NONE, MAP_FIXED_NOREPLACE|MAP_ANON|MAP_PRIVATE|MAP_NORESERVE, -1, 0);
+            if (compat_guard_start == MAP_FAILED)
+                ASSERT_ELSE_PERROR(errno == EEXIST);
+        }
+
         assert(max_radix > min_radix && max_radix < NON_NOOB_MIN_RADIX && max_radix <= (42 - TAG_WIDTH));
         for (uint8_t radix = min_radix; radix <= max_radix; radix++) {
             per_size_allocators.push_back(NOOBSizeAllocator{radix});
