@@ -1,8 +1,9 @@
 #pragma once
 
-#define TAG_WIDTH                    (${TAG_WIDTH})
+#define TAG_WIDTH                   (${TAG_WIDTH})
 #define NOOB_MIN_RADIX              (${NOOB_MIN_RADIX})
-#define NON_NOOB_MIN_RADIX           (${NON_NOOB_MIN_RADIX})
+#define NON_NOOB_MIN_RADIX          (${NON_NOOB_MIN_RADIX})
+#define NOOB_IGNORE_ERRORS          (${NOOB_IGNORE_ERRORS})
 
 #define ARITH_LEEWAY_WIDTH          (${ARITH_LEEWAY_WIDTH})
 static_assert(ARITH_LEEWAY_WIDTH == 0, "we don't need to permit additional arithmetic");

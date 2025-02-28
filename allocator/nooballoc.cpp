@@ -47,7 +47,7 @@ struct run_on_destruct {
 #define NUM_BLOCKS_IN_ARENA         (1U << TAG_WIDTH)
 #define TAG_T_MAX                   (NUM_BLOCKS_IN_ARENA - 1)
 
-#define TAG_POINTERS                1
+#define TAG_POINTERS                (!NOOB_IGNORE_ERRORS)
 
 bool noob_is_nonnoob(uintptr_t ptr) {
     return extract_radix(ptr) >= NON_NOOB_MIN_RADIX;

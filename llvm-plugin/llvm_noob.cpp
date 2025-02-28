@@ -270,10 +270,16 @@ llvm::Value* NOOBInstrumentationPass::computeRadix(llvm::Value* ptrAsInt, llvm::
         "", 
         insertBefore
     );
-    // mask out the top tag
-    radix = llvm::BinaryOperator::CreateAnd(radix, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, 0xFF}), "", insertBefore);
+#if NOOB_IGNORE_ERRORS
+    // fake out the instrumentation by always looking up the NON_NOOB_MIN_RADIX value here
+    //  to prevent the compiler from optimizing on this, we add them with some bits that we know are 0, but the compiler doesn't. 
+    radix = llvm::BinaryOperator::CreateLShr(radix, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, 6}), "", insertBefore);
+    radix = llvm::BinaryOperator::CreateAdd(radix, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, NON_NOOB_MIN_RADIX - NOOB_MIN_RADIX}), "", insertBefore);
+#endif
     // decode the in-pointer radix value into a logical one
     radix = llvm::BinaryOperator::CreateAdd(radix, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, NOOB_MIN_RADIX}), "", insertBefore);
+    // mask out the top tag
+    radix = llvm::BinaryOperator::CreateAnd(radix, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, 0xFF}), "", insertBefore);
     return radix;
 }
 

@@ -2,20 +2,22 @@
 
 # encode platform differences here
 if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
-    set(TAG_WIDTH                7)
+    set(TAG_WIDTH               7)
     # minimum 16B allocations
     set(NOOB_MIN_RADIX          0x4)
     # maximum 16GB allocations
-    set(NON_NOOB_MIN_RADIX       35)
+    set(NON_NOOB_MIN_RADIX      35)
+    set(NOOB_IGNORE_ERRORS      1)
 elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
-    set(TAG_WIDTH                8)
+    set(TAG_WIDTH               8)
     # no minimum allocation size
     #   the implementation may enforce additional minima for performance/simplicity
     #   but this setting guarantees that the actual radix will be encoded natively in the pointer
     set(NOOB_MIN_RADIX          0x0)
     # allocator may enforce lower limits (e.g. 34), but mapping non-noob above this
     #   ensures that it is transparently ignored by our instrumentation, without explicit masking
-    set(NON_NOOB_MIN_RADIX       47)
+    set(NON_NOOB_MIN_RADIX      47)
+    set(NOOB_IGNORE_ERRORS      0)
 else()
     message(FATAL_ERROR "Unsupported architecture: ${CMAKE_SYSTEM_PROCESSOR}")
 endif()
