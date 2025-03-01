@@ -8,7 +8,7 @@ target_compile_options(nooballoc PUBLIC
 )
 target_compile_options(nooballoc PRIVATE -fno-rtti -fno-exceptions)
 target_compile_options(nooballoc PRIVATE -flto)
-target_link_options(nooballoc PRIVATE -flto)
+target_link_options(nooballoc PRIVATE -flto -fuse-ld=lld-15)
 target_link_libraries(nooballoc "-ldl")
 
 add_executable(test_noob test.cpp)
