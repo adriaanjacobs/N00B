@@ -262,27 +262,6 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
     return checkInfoToUses;
 }
 
-llvm::Value* NOOBInstrumentationPass::computeRadix(llvm::Value* ptrAsInt, llvm::Instruction* insertBefore) {
-    auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
-    auto radix = llvm::BinaryOperator::CreateLShr(
-        ptrAsInt, 
-        llvm::ConstantInt::get(int64Ty, llvm::APInt{64, 42}), 
-        "", 
-        insertBefore
-    );
-#if NOOB_IGNORE_ERRORS
-    // fake out the instrumentation by always looking up the NON_NOOB_MIN_RADIX value here
-    //  to prevent the compiler from optimizing on this, we add them with some bits that we know are 0, but the compiler doesn't. 
-    radix = llvm::BinaryOperator::CreateLShr(radix, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, 6}), "", insertBefore);
-    radix = llvm::BinaryOperator::CreateAdd(radix, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, NON_NOOB_MIN_RADIX - NOOB_MIN_RADIX}), "", insertBefore);
-#endif
-    // decode the in-pointer radix value into a logical one
-    radix = llvm::BinaryOperator::CreateAdd(radix, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, NOOB_MIN_RADIX}), "", insertBefore);
-    // mask out the top tag
-    radix = llvm::BinaryOperator::CreateAnd(radix, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, 0xFF}), "", insertBefore);
-    return radix;
-}
-
 llvm::Value* NOOBInstrumentationPass::computeSafeInArithAreaPtr(llvm::Value* ptr, llvm::Value* arithAreaSize, llvm::Value* arithAreaBase, llvm::Value* trackedBase, llvm::Instruction* insertBefore) {
     auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
     auto int8PtrTy = llvm::Type::getInt8PtrTy(insertBefore->getContext());
@@ -383,6 +362,8 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
     auto int8Ty = llvm::Type::getInt8Ty(context);
     auto boolTy = llvm::Type::getInt1Ty(context);
     auto noob_access_check_fn = module.getOrInsertFunction("noob_access_check", llvm::Type::getVoidTy(context), int8PtrTy, int8PtrTy, boolTy, boolTy);
+    // embed the lookup table if necessary
+    RadixDecoder radixDecoder{module};
     // now insert an arithmetic & tag check at all dereference sites
     llvm::DenseSet<llvm::Use*> replacedUses;
     for (auto& [checkInfo, usesToReplace] : checkInfoToUses) {
@@ -402,24 +383,13 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
 #else
         // compute radix from base! otherwise potentially overwritten in ptr
         auto baseAsInt = llvm::CastInst::CreateBitOrPointerCast(checkInfo->trackedBase, int64Ty, "", insertBefore);
-        auto radix = computeRadix(baseAsInt, insertBefore);
+        auto radix = radixDecoder.computeRadix(baseAsInt, insertBefore);
 
         if (checkInfo->shouldCheckDereference()) {
             assert(!checkInfo->isEscapeSite);
             assert(CHECK_POINTER_DEREFERENCES);
             assert(CHECK_DEREFERENCE_SITES); // should never deref check escape sites
             auto poisonMask = computePoisonMaskAtDerefSite(*checkInfo, baseAsInt, radix, insertBefore);
-            if (NON_NOOB_MIN_RADIX < 48) { // if >= 48, the iptag will be 0
-                // the below essentially does: mask = radix > MAX_RADIX ? 0x0 : ~0x0
-                // but without the conditional evaluation
-                //  subtract the minimum "radix" of non-noob memory
-                auto mask = llvm::BinaryOperator::CreateSub(radix, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, NON_NOOB_MIN_RADIX}), "", insertBefore);
-                //  if radix <= MAX_RADIX, the high bits will be set. Arithmetic shift out the low bits to create an all-ones mask
-                //  if radix > MAX_RADIX, the high bits will be zero. Arithmetic shift out the low bits to create an all-zero mask
-                mask = llvm::BinaryOperator::CreateAShr(mask, llvm::Constant::getIntegerValue(int64Ty, {64, 8}), "", insertBefore);
-                // apply the mask to the poisonMask: radix > MAX_RADIX generates a 0 poison mask
-                poisonMask = llvm::BinaryOperator::CreateAnd(poisonMask, mask, "", insertBefore);
-            }
             if (checkInfo->isRangeCheck()) {
                 // crucial: make sure the pointer being poisoned later on is the actual start value of the loop
                 //  this can be different than the current pointerOperand, which is simply the lowest value of the accessed range

@@ -26,6 +26,7 @@ add_subdirectory(llvm-utils/)
 add_library(llvmnoob SHARED 
     llvm_noob.cpp 
     track_base_ptr.cpp
+    radix_decoder.cpp
     llvm_noob_plugin.cpp
 )
 target_compile_options(llvmnoob PUBLIC 
