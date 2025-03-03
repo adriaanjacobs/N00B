@@ -426,7 +426,7 @@ struct NOOBAllocator {
 };
 
 // never dealloc
-NOOBAllocator* noob_allocator = new NOOBAllocator(std::max(34, NON_NOOB_MIN_RADIX - 1));
+NOOBAllocator* noob_allocator = new NOOBAllocator(std::min(34, NON_NOOB_MIN_RADIX - 1));
 
 void* noob_malloc(size_t nbytes) {
     assert(!hooked);
@@ -477,7 +477,7 @@ static uintptr_t noob_embed_inpointer_tag(uintptr_t ptr, uint8_t top_tag) {
 
     ptr >>= radix;
     ptr &= ~static_cast<uint64_t>(TAG_T_MAX);
-    assert(top_tag < NUM_BLOCKS_IN_ARENA);
+    assert(top_tag <= NUM_BLOCKS_IN_ARENA - 1);
     ptr |= top_tag;
     ptr <<= radix;
     ptr |= offset;
