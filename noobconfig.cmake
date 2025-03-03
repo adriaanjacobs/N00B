@@ -17,7 +17,8 @@ elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
     set(NOOB_MIN_RADIX          0x0)
     # allocator may enforce lower limits (e.g. 34), but mapping non-noob above this
     #   ensures that it is transparently ignored by our instrumentation, without explicit masking
-    set(NON_NOOB_MIN_RADIX      47)
+    #   48 is the magical value where all instrumentation is transparently ignored
+    set(NON_NOOB_MIN_RADIX      48)
     set(NOOB_IGNORE_ERRORS      0)
     set(NOOB_TAG_POINTERS       1)
 else()
