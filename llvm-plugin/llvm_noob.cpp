@@ -14,6 +14,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/DebugInfo.h>
+#include <llvm/IR/MDBuilder.h>
 #include <llvm/Support/FormatVariadic.h>
 #include <llvm/IR/IRPrintingPasses.h>
 #include <llvm/Analysis/StackSafetyAnalysis.h>
@@ -339,11 +340,16 @@ llvm::Value* NOOBInstrumentationPass::computePoisonMaskAtDerefSite(const CheckIn
             //  clear the garbage top bits in this mask
             isNotInBounds = llvm::BinaryOperator::CreateAnd(isNotInBounds, llvm::ConstantInt::getIntegerValue(int64Ty, {64, (1U << TAG_WIDTH) - 1}), "", insertBefore);
         }
+#if USE_BRANCHING_CHECKS // with branching checks, we verify whether the entire thing is 0
+        // mask out the more significant bits
+        auto poisonMask = llvm::BinaryOperator::CreateAnd(isNotInBounds, llvm::ConstantInt::getIntegerValue(int64Ty, {64, (1U << TAG_WIDTH) - 1}), "", insertBefore);
+#else
         //                          64      56/57   48    42                   0 
         // place the resulting value |top bits|_here_|radix|rest of pointer ...|
         //  it's not a problem that the more significant bits of the `poisonMask` value likely aren't 0 here, they will get ignored by TBI/UAI anyway
         //  this would only be a problem for range checks, where the pointer value could escape, but we zero out the top bits of isNotInBounds for that reason
         auto poisonMask = llvm::BinaryOperator::CreateShl(isNotInBounds, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH - TAG_WIDTH}), "", insertBefore);
+#endif
         return poisonMask;
     }
 }
@@ -358,10 +364,27 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
 
     auto& context = module.getContext();
     auto int64Ty = llvm::Type::getInt64Ty(context);
+    // create the decl for EMIT_RUNTIME_CALLS
     auto int8PtrTy = llvm::Type::getInt8PtrTy(context);
-    auto int8Ty = llvm::Type::getInt8Ty(context);
     auto boolTy = llvm::Type::getInt1Ty(context);
     auto noob_access_check_fn = module.getOrInsertFunction("noob_access_check", llvm::Type::getVoidTy(context), int8PtrTy, int8PtrTy, boolTy, boolTy);
+    // create the function containing the branching instrumentation
+    auto noob_assert_zero_fn = module.getOrInsertFunction("noob_assert_zero", llvm::Type::getVoidTy(context), int64Ty);
+    {
+        auto func = llvm::cast<llvm::Function>(noob_assert_zero_fn.getCallee());
+        func->addFnAttr(llvm::Attribute::AlwaysInline);
+        auto entry = llvm::BasicBlock::Create(context, "", func);
+        auto ret = llvm::ReturnInst::Create(context, entry);
+
+        auto isNotZero = new llvm::ICmpInst(ret, llvm::ICmpInst::ICMP_NE, func->getArg(0), llvm::ConstantInt::getNullValue(int64Ty), "notzero");
+        llvm::MDBuilder MDHelper{context};
+        auto weights = MDHelper.createBranchWeights(1, 1000);
+        auto ifZeroBlockTerm = llvm::SplitBlockAndInsertIfThen(isNotZero, ret, true, weights);
+        
+        auto trapFn = llvm::Intrinsic::getDeclaration(&module, llvm::Intrinsic::debugtrap);
+        auto callTrap = llvm::CallInst::Create(trapFn, "", ifZeroBlockTerm);
+    }
+
     // embed the lookup table if necessary
     RadixDecoder radixDecoder{module};
     // now insert an arithmetic & tag check at all dereference sites
@@ -407,12 +430,17 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
                 } ();
                 checkInfo->pointerOperand = pointerOperand;
             }
+#if USE_BRANCHING_CHECKS
+            // check if the poisonMask is 0
+            auto trapIfNotZero = llvm::CallInst::Create(noob_assert_zero_fn, {poisonMask}, "", insertBefore);
+#else
             // poison the pointerOperand
             auto ptrAsInt = castToInt64Ty(checkInfo->pointerOperand, insertBefore); // reset the ptrAsInt because isRangeCheck clause mightve changed pointerOperand
             llvm::Instruction* poisonedPtr = llvm::BinaryOperator::CreateOr(ptrAsInt, poisonMask, "", insertBefore);
             poisonedPtr = new llvm::IntToPtrInst(poisonedPtr, checkInfo->pointerOperand->getType(), "", insertBefore);
             // replace the access ptroperand
             checkInfo->pointerOperand = poisonedPtr;
+#endif
         } else if (checkInfo->shouldCheckArith()) {
             assert(checkInfo->isEscapeSite);
             // this is an escape site. wrap the pointer instead of poisoning

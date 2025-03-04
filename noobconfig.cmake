@@ -7,8 +7,8 @@ if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
     set(NOOB_MIN_RADIX          0x4)
     # maximum 16GB allocations
     set(NON_NOOB_MIN_RADIX      35)
-    set(NOOB_IGNORE_ERRORS      1)
-    set(NOOB_TAG_POINTERS       0)
+    set(NOOB_IGNORE_ERRORS      0)
+    set(NOOB_TAG_POINTERS       1)
 elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
     set(TAG_WIDTH               8)
     # no minimum allocation size
@@ -32,6 +32,7 @@ set(CHECK_DEREFERENCE_SITES     1)
 set(CHECK_ESCAPE_SITES          1)
 set(CHECK_POINTER_ARITHMETIC    1)
 set(CHECK_POINTER_DEREFERENCES  1)
+set(USE_BRANCHING_CHECKS        1)
 
 set(REPLACE_STACK_ALLOCS        1)
 set(REMAP_GLOBALS               0)
