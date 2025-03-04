@@ -169,7 +169,7 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
     }
 
     LoopHoister loopHoister{module, MAM};
-    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, true);
+    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, !USE_BRANCHING_CHECKS and !EMIT_RUNTIME_CALLS); // only if we use poisoning instrumentation, we can hoist LI non-postdom. Not when branching though
 
     // keep track of the checkinfos that describe dereferences
     //  this is because they may be deleted (not modified, we check this later) by the next round of optimizations
@@ -219,7 +219,7 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
 
     // then optimize the list _again_. the loophoister will share expanded SCEVs for both i think
     //  the advantage is that this will eliminate dominated arithmetic checks and such
-    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, true);
+    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, !USE_BRANCHING_CHECKS and !EMIT_RUNTIME_CALLS); // only if we use poisoning instrumentation, we can hoist LI non-postdom. Not when branching though
 
     { // sanitize: check that this second hoisting step did not modify any of the points that also describe dereferences
         // otherwise, the introduction of new points is changing the location of existing points? this may happen in the future
