@@ -45,7 +45,7 @@ struct run_on_destruct {
 #define defer(block) run_on_destruct UNIQUE_VAR_NAME{[&] () -> void { block; }}
 
 #define NUM_BLOCKS_IN_ARENA         (1U << TAG_WIDTH)
-#define TAG_T_MAX                   (NUM_BLOCKS_IN_ARENA - 1)
+#define TAG_T_MAX                   (NUM_BLOCKS_IN_ARENA - 1UL)
 
 bool noob_is_nonnoob(uintptr_t ptr) {
     return extract_radix(ptr) >= NON_NOOB_MIN_RADIX;

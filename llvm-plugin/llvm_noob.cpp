@@ -169,7 +169,7 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
     }
 
     LoopHoister loopHoister{module, MAM};
-    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, !USE_BRANCHING_CHECKS and !EMIT_RUNTIME_CALLS); // only if we use poisoning instrumentation, we can hoist LI non-postdom. Not when branching though
+    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, !EMIT_RUNTIME_CALLS); // runtime debug cannot handle non-postdom
 
     // keep track of the checkinfos that describe dereferences
     //  this is because they may be deleted (not modified, we check this later) by the next round of optimizations
@@ -219,7 +219,7 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
 
     // then optimize the list _again_. the loophoister will share expanded SCEVs for both i think
     //  the advantage is that this will eliminate dominated arithmetic checks and such
-    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, !USE_BRANCHING_CHECKS and !EMIT_RUNTIME_CALLS); // only if we use poisoning instrumentation, we can hoist LI non-postdom. Not when branching though
+    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, !EMIT_RUNTIME_CALLS); // runtime debug cannot handle non-postdom
 
     { // sanitize: check that this second hoisting step did not modify any of the points that also describe dereferences
         // otherwise, the introduction of new points is changing the location of existing points? this may happen in the future
@@ -414,6 +414,7 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
             assert(CHECK_DEREFERENCE_SITES); // should never deref check escape sites
             auto poisonMask = computePoisonMaskAtDerefSite(*checkInfo, baseAsInt, radix, insertBefore);
             if (checkInfo->isRangeCheck()) {
+                assert(!checkInfo->unsoundlyHoisted);
                 // crucial: make sure the pointer being poisoned later on is the actual start value of the loop
                 //  this can be different than the current pointerOperand, which is simply the lowest value of the accessed range
                 assert(!replacedUses.contains(*usesToReplace.begin()));
@@ -430,17 +431,17 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
                 } ();
                 checkInfo->pointerOperand = pointerOperand;
             }
-#if USE_BRANCHING_CHECKS
-            // check if the poisonMask is 0
-            auto trapIfNotZero = llvm::CallInst::Create(noob_assert_zero_fn, {poisonMask}, "", insertBefore);
-#else
-            // poison the pointerOperand
-            auto ptrAsInt = castToInt64Ty(checkInfo->pointerOperand, insertBefore); // reset the ptrAsInt because isRangeCheck clause mightve changed pointerOperand
-            llvm::Instruction* poisonedPtr = llvm::BinaryOperator::CreateOr(ptrAsInt, poisonMask, "", insertBefore);
-            poisonedPtr = new llvm::IntToPtrInst(poisonedPtr, checkInfo->pointerOperand->getType(), "", insertBefore);
-            // replace the access ptroperand
-            checkInfo->pointerOperand = poisonedPtr;
-#endif
+            if (USE_BRANCHING_CHECKS && !checkInfo->unsoundlyHoisted) { // branching instrumentation can only guard postdom memaccesses. Use pointer poisoning for non-postdom checks
+                // check if the poisonMask is 0
+                auto trapIfNotZero = llvm::CallInst::Create(noob_assert_zero_fn, {poisonMask}, "", insertBefore);
+            } else {
+                // poison the pointerOperand
+                auto ptrAsInt = castToInt64Ty(checkInfo->pointerOperand, insertBefore); // reset the ptrAsInt because isRangeCheck clause mightve changed pointerOperand
+                llvm::Instruction* poisonedPtr = llvm::BinaryOperator::CreateOr(ptrAsInt, poisonMask, "", insertBefore);
+                poisonedPtr = new llvm::IntToPtrInst(poisonedPtr, checkInfo->pointerOperand->getType(), "", insertBefore);
+                // replace the access ptroperand
+                checkInfo->pointerOperand = poisonedPtr;
+            }
         } else if (checkInfo->shouldCheckArith()) {
             assert(checkInfo->isEscapeSite);
             // this is an escape site. wrap the pointer instead of poisoning
