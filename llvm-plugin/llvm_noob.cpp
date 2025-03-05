@@ -407,6 +407,25 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
                     if (checkInfo->insertBefore->comesBefore(insertBefore))
                         insertBefore = checkInfo->insertBefore;
 
+            // do a little bit of hoisting here: if the baseobj/radix computation unnecessarily happens in a loop, hoist it
+            auto trackedBaseDominates = [&,&trackedBase = trackedBase] (llvm::Instruction* loc) -> bool {
+                if (llvm::isa<llvm::Argument, llvm::GlobalVariable>(trackedBase))
+                    return true;
+                auto trackedBaseInst = llvm::dyn_cast<llvm::Instruction>(trackedBase);
+                ASSERT_ELSE_UNKOWN(trackedBaseInst, trackedBase);
+                ASSERT_ELSE_UNKOWN(trackedBaseInst != loc, loc);
+                return domTree.dominates(trackedBaseInst, loc);
+            };
+            auto& loopInfo = getFAM(module, MAM).getResult<llvm::LoopAnalysis>(*func);
+            while (true) {
+                if (auto loop = loopInfo.getLoopFor(insertBefore->getParent()))
+                    if (loop->getLoopPreheader() && trackedBaseDominates(loop->getLoopPreheader()->getTerminator())) {
+                        insertBefore = loop->getLoopPreheader()->getTerminator();
+                        continue;
+                    }
+                break;
+            }
+
             // precompute radix from base
             auto baseAsInt = createBitOrPointerCastIfNecessary(trackedBase, int64Ty, "", insertBefore);
             auto radix = radixDecoder.computeRadix(baseAsInt, insertBefore);
