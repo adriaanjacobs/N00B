@@ -22,3 +22,6 @@ static_assert(ARITH_LEEWAY_OCCUPIED_BITS < (1U << ARITH_LEEWAY_WIDTH));
 #define REMAP_GLOBALS               ${REMAP_GLOBALS}
 
 #define EMIT_RUNTIME_CALLS          ${EMIT_RUNTIME_CALLS}
+
+#define EMULATE_LOWFAT              ${EMULATE_LOWFAT}
+#define PAD_BY_ONE_BYTE             ${PAD_BY_ONE_BYTE}

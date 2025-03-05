@@ -162,14 +162,14 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
 #if CHECK_DEREFERENCE_SITES
         // this use shouldnt exist yet
         ASSERT_ELSE_UNKOWN(!funcToCheckPoints[access->getFunction()].count(&ptrUse), access);
-        auto newCheckInfo = new CheckInfo(access, ptrUse.get(), CHECK_POINTER_DEREFERENCES, false);
+        auto newCheckInfo = new CheckInfo(access, ptrUse.get(), CHECK_POINTER_DEREFERENCES && !EMULATE_LOWFAT, false); // lowfat only has a single type of check, we use "arith" for it
         funcToCheckPoints[access->getFunction()][&ptrUse] = newCheckInfo;
         dbg_checkInfos.insert(newCheckInfo);
 #endif
     }
 
     LoopHoister loopHoister{module, MAM};
-    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, !EMIT_RUNTIME_CALLS); // runtime debug cannot handle non-postdom
+    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, !EMIT_RUNTIME_CALLS && !EMULATE_LOWFAT); // lowfat and runtime debug cannot handle non-postdom
 
     // keep track of the checkinfos that describe dereferences
     //  this is because they may be deleted (not modified, we check this later) by the next round of optimizations
@@ -219,7 +219,7 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
 
     // then optimize the list _again_. the loophoister will share expanded SCEVs for both i think
     //  the advantage is that this will eliminate dominated arithmetic checks and such
-    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, !EMIT_RUNTIME_CALLS); // runtime debug cannot handle non-postdom
+    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, false); // non-wrapping escape instrumentation is always branching
 
     { // sanitize: check that this second hoisting step did not modify any of the points that also describe dereferences
         // otherwise, the introduction of new points is changing the location of existing points? this may happen in the future
@@ -407,7 +407,7 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
                     if (checkInfo->insertBefore->comesBefore(insertBefore))
                         insertBefore = checkInfo->insertBefore;
 
-            // do a little bit of hoisting here: if the baseobj/radix computation unnecessarily happens in a loop, hoist it
+            // do a little bit of hoisting here: if the baseobj/radix precomputation unnecessarily happens in a loop, hoist it
             auto trackedBaseDominates = [&,&trackedBase=trackedBase] (llvm::Instruction* loc) -> bool {
                 // 453.povray _actually_ has a *(null + 32-bit value). When that executes, we'll simply trigger a crash.
                 if (llvm::isa<llvm::Argument, llvm::GlobalVariable, llvm::ConstantPointerNull>(trackedBase))
@@ -431,12 +431,17 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
             auto baseAsInt = createBitOrPointerCastIfNecessary(trackedBase, int64Ty, "", insertBefore);
             auto radix = radixDecoder.computeRadix(baseAsInt, insertBefore);
 
+#if EMULATE_LOWFAT
+            // precompute the objbase here for lowfat
+            auto origObj = llvm::BinaryOperator::CreateLShr(baseAsInt, radix, "lowfat.baseobj", insertBefore);
+#else
             // precompute "origObj" value with toptag in lower bits: most often needed value at arithderef sites
             auto topTag = computeTopTag(baseAsInt, radix, insertBefore);
             auto origObj = llvm::BinaryOperator::CreateLShr(baseAsInt, radix, "", insertBefore);
             origObj = llvm::BinaryOperator::CreateAnd(origObj, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, ~((1ULL << TAG_WIDTH) - 1)}), "", insertBefore); // clear iptag bits
             origObj = llvm::BinaryOperator::CreateOr(origObj, topTag, "", insertBefore);
-
+#endif
+        
             baseToBasePtrInfo[trackedBase][func] = {radix, origObj};
         }
     }
@@ -460,6 +465,23 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
 #else
         auto basePtrInfo = baseToBasePtrInfo.find(checkInfo->trackedBase)->getSecond().find(checkInfo->insertBefore->getFunction())->getSecond();
 
+#if EMULATE_LOWFAT
+        assert(!checkInfo->shouldCheckDereference()); // we explicitly disable these because we implement lowfat as arith checks
+        if (checkInfo->shouldCheckArith()) {
+            auto ptrAsInt = createBitOrPointerCastIfNecessary(checkInfo->pointerOperand, int64Ty, "", insertBefore);
+            auto ptrObj = llvm::BinaryOperator::CreateLShr(ptrAsInt, basePtrInfo.radix, "lowfat.ptrobj", insertBefore);
+            llvm::Instruction* isInBounds = new llvm::ICmpInst(insertBefore, llvm::ICmpInst::ICMP_EQ, ptrObj, basePtrInfo.origObj, "inbounds");
+            if (checkInfo->isRangeCheck()) {
+                auto endPtrAsInt = createBitOrPointerCastIfNecessary(checkInfo->endOfAddressRange, int64Ty, "", insertBefore);
+                auto endPtrObj = llvm::BinaryOperator::CreateLShr(endPtrAsInt, basePtrInfo.radix, "lowfat.endPtrObj", insertBefore);
+                auto endPtrInBounds = new llvm::ICmpInst(insertBefore, llvm::ICmpInst::ICMP_EQ, endPtrObj, basePtrInfo.origObj, "inbounds");
+                isInBounds = llvm::SelectInst::Create(isInBounds, isInBounds, endPtrInBounds, "inbounds", insertBefore);
+            }
+            auto poison = llvm::SelectInst::Create(isInBounds, llvm::ConstantInt::getNullValue(int64Ty), llvm::ConstantInt::get(int64Ty, llvm::APInt{64, 1}), "", insertBefore);
+            static_assert(USE_BRANCHING_CHECKS);
+            auto trapIfNotZero = llvm::CallInst::Create(noob_assert_zero_fn, {poison}, "", insertBefore);
+        }
+#else
         if (checkInfo->shouldCheckDereference()) {
             assert(!checkInfo->isEscapeSite);
             assert(CHECK_POINTER_DEREFERENCES);
@@ -524,7 +546,8 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
             useToReplace->set(castedPtr);
             replacedUses.insert(useToReplace);
         }
-#endif
+#endif // EMULATE_LOWFAT
+#endif // EMIT_RUNTIME_CALLS
     }
 
     dumpModuleToFile(module, "afterinstrumentation.noob.ll");

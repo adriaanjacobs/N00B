@@ -90,7 +90,7 @@ const void* noob_striptop(const void* ptr) {
 decltype(malloc) __libc_malloc;
 void* malloc(size_t nbytes) {
     IF_NOT_HOOKED(__libc_malloc(nbytes));
-    return LOGGED_CALL(noob_malloc, nbytes);
+    return LOGGED_CALL(noob_malloc, nbytes + PAD_BY_ONE_BYTE);
 }
 
 decltype(free) __libc_free;
@@ -102,38 +102,38 @@ void free(void* ptr) {
 decltype(realloc) __libc_realloc;
 void* realloc(void* oldptr, size_t newsize) {
     IF_NOT_HOOKED(__libc_realloc(oldptr, newsize));
-    return LOGGED_CALL(noob_realloc, oldptr, newsize);
+    return LOGGED_CALL(noob_realloc, oldptr, newsize + PAD_BY_ONE_BYTE);
 }
 
 void* reallocarray (void *ptr, size_t nmemb, size_t size) {
-    return realloc(ptr, nmemb * size);
+    return realloc(ptr, (nmemb * size) + PAD_BY_ONE_BYTE);
 }
 
 decltype(memalign) __libc_memalign;
 void* memalign(size_t alignment, size_t size) {
     IF_NOT_HOOKED(__libc_memalign(alignment, size));
-    return LOGGED_CALL(noob_memalign, alignment, size);
+    return LOGGED_CALL(noob_memalign, alignment, size + PAD_BY_ONE_BYTE);
 }
 
 void* valloc (size_t size) {
-    return memalign(0x1000, size);
+    return memalign(0x1000, size + PAD_BY_ONE_BYTE);
 }
 
 void* aligned_alloc (size_t alignment, size_t size) {
-    return memalign(alignment, size);
+    return memalign(alignment, size + PAD_BY_ONE_BYTE);
 }
 
 int posix_memalign (void **memptr, size_t alignment, size_t size) {
     if (alignment % sizeof(void*) != 0 || std::popcount(alignment) != 1)
         return EINVAL;
-    *memptr = memalign(alignment, size);
+    *memptr = memalign(alignment, size + PAD_BY_ONE_BYTE);
     return 0;
 }
 
 decltype(calloc) __libc_calloc;
 void* calloc(size_t nmemb, size_t size) {
     IF_NOT_HOOKED(__libc_calloc(nmemb, size));
-    return LOGGED_CALL(noob_calloc, nmemb * size);
+    return LOGGED_CALL(noob_calloc, (nmemb * size) + PAD_BY_ONE_BYTE);
 }
 
 size_t malloc_usable_size(void* ptr) {
