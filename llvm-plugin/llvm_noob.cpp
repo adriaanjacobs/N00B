@@ -446,7 +446,6 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
             assert(CHECK_DEREFERENCE_SITES); // should never deref check escape sites
             auto poisonMask = computePoisonMaskAtDerefSite(*checkInfo, basePtrInfo, insertBefore);
             if (checkInfo->isRangeCheck()) {
-                assert(!checkInfo->unsoundlyHoisted);
                 // crucial: make sure the pointer being poisoned later on is the actual start value of the loop
                 //  this can be different than the current pointerOperand, which is simply the lowest value of the accessed range
                 assert(!replacedUses.contains(*usesToReplace.begin()));
