@@ -38,16 +38,20 @@ class NOOBInstrumentationPass : public llvm::PassInfoMixin<NOOBInstrumentationPa
     void extendNOOBLinkerScript(std::string& noobLinkerScript, const std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>>& radixToGlobals);
 
     llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> createInstrumentationPlans(llvm::Module& module, llvm::ModuleAnalysisManager& MAM);
-    void applyNOOBChecks(llvm::Module& module, const llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>>& checkInfoToUses);
+    void applyNOOBChecks(llvm::Module& module, llvm::ModuleAnalysisManager& MAM, const llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>>& checkInfoToUses);
 
     llvm::DenseMap<llvm::Function*, llvm::DenseSet<llvm::AllocaInst*>> findUnsafeAllocas(llvm::Module& module, llvm::ModuleAnalysisManager& MAM);
     void moveUnsafeAllocasToNOOBStacks(llvm::Module& module, const llvm::DenseMap<llvm::Function*, llvm::DenseSet<llvm::AllocaInst*>>& unsafeAllocas);
 
+    struct BasePtrInfo {
+        llvm::Value* radix;
+        llvm::Value* origObj;
+    };
     llvm::Value* computeSafeInArithAreaPtr(llvm::Value* ptr, llvm::Value* arithAreaSize, llvm::Value* arithAreaBase, llvm::Value* trackedBase, llvm::Instruction* insertBefore);
     llvm::Value* shiftDownTillInPointerTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore);
     llvm::Value* computeInPointerTagMask(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore);
     llvm::Value* computeTopTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore);
-    llvm::Value* computePoisonMaskAtDerefSite(const CheckInfo& checkInfo, llvm::Value* baseAsInt, llvm::Value* radix, llvm::Instruction* insertBefore);
+    llvm::Value* computePoisonMaskAtDerefSite(const CheckInfo& checkInfo, const BasePtrInfo& basePtrInfo, llvm::Instruction* insertBefore);
 
 public:
     explicit NOOBInstrumentationPass() = default;

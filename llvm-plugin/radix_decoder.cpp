@@ -22,7 +22,7 @@ RadixDecoder::RadixDecoder(llvm::Module& module) :
         tableValues[i] = llvm::ConstantInt::get(int8Ty, llvm::APInt{8, 48});
 
     auto radixTableInitializer = llvm::ConstantArray::get(arrayType, tableValues);
-    radixTable = new llvm::GlobalVariable(module, arrayType, true, llvm::GlobalVariable::PrivateLinkage, radixTableInitializer, "radix_table");
+    radixTable = new llvm::GlobalVariable(module, arrayType, true, llvm::GlobalVariable::PrivateLinkage, radixTableInitializer, "noob.radixtable");
 #endif
 
 }

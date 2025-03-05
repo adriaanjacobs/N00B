@@ -296,19 +296,17 @@ llvm::Value* NOOBInstrumentationPass::computeTopTag(llvm::Value* ptr, llvm::Valu
     return llvm::BinaryOperator::CreateLShr(ptrAsInt, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH}), "toptag", insertBefore);
 }
 
-llvm::Value* NOOBInstrumentationPass::computePoisonMaskAtDerefSite(const CheckInfo& checkInfo, llvm::Value* baseAsInt, llvm::Value* radix, llvm::Instruction* insertBefore) {
+llvm::Value* NOOBInstrumentationPass::computePoisonMaskAtDerefSite(const CheckInfo& checkInfo, const BasePtrInfo& basePtrInfo, llvm::Instruction* insertBefore) {
     auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
     // FIXME: "mbedtls_md5_starts_ret" in benchmark.ll has an example at the top of an unnecessary arith check. why do we have it??
     assert(checkInfo.shouldCheckDereference()); // this function assumes we're at a deref site, for poisoning
+    const auto radix = basePtrInfo.radix;
     if (checkInfo.shouldCheckArith()) {
         assert(CHECK_POINTER_ARITHMETIC);
         static_assert(ARITH_LEEWAY_WIDTH == 0, "I did not account for non-zero leeway bits here");
         // common case: we check both arith & deref
         //  implement optimized instrumentation here, that checks arith & deref at once
-        auto topTag = computeTopTag(baseAsInt, radix, insertBefore);
-        auto origObj = llvm::BinaryOperator::CreateLShr(baseAsInt, radix, "", insertBefore);
-        origObj = llvm::BinaryOperator::CreateAnd(origObj, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, ~((1ULL << TAG_WIDTH) - 1)}), "", insertBefore); // clear iptag bits
-        origObj = llvm::BinaryOperator::CreateOr(origObj, topTag, "", insertBefore);
+        auto origObj = basePtrInfo.origObj;
         auto ptrAsInt = castToInt64Ty(checkInfo.pointerOperand, insertBefore);
         auto currentObj = llvm::BinaryOperator::CreateLShr(ptrAsInt, radix, "", insertBefore);
         llvm::Instruction* isInBounds = new llvm::ICmpInst(insertBefore, llvm::ICmpInst::ICMP_EQ, currentObj, origObj, "");
@@ -355,7 +353,7 @@ llvm::Value* NOOBInstrumentationPass::computePoisonMaskAtDerefSite(const CheckIn
 }
 
 // actually modify the program to insert the checks and update the usesToReplace
-void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>>& checkInfoToUses) {
+void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::ModuleAnalysisManager& MAM, const llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>>& checkInfoToUses) {
     //  keep in mind here that multiple uses can use the same instrumentation
     //  invert the checkinfo map here to ensure we only insert instrumentation once per instpoint
 
@@ -387,6 +385,42 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
 
     // embed the lookup table if necessary
     RadixDecoder radixDecoder{module};
+    // precompute the baseobj & radix for all trackedbases. Will be unused if not needed, otherwise good speedup
+    llvm::DenseMap<llvm::Value*, llvm::DenseMap<llvm::Function*, llvm::DenseSet<CheckInfo*>>> trackedBaseToCheckInfos;
+    for (auto& [checkInfo, usesToReplace] : checkInfoToUses) 
+        trackedBaseToCheckInfos[checkInfo->trackedBase][checkInfo->insertBefore->getFunction()].insert(checkInfo);
+    llvm::DenseMap<llvm::Value* /* trackedBase */, llvm::DenseMap<llvm::Function*, BasePtrInfo>> baseToBasePtrInfo;
+    for (auto& [trackedBase, funcToCheckInfos] : trackedBaseToCheckInfos) {
+        for (auto& [func, checkInfos] : funcToCheckInfos) {
+            auto& domTree = getFAM(module, MAM).getResult<llvm::DominatorTreeAnalysis>(*func);
+
+            // figure out the nearest common dominator of all checkinfos that share a trackedbase
+            assert(checkInfos.size() > 0);
+            auto NCD = (*checkInfos.begin())->insertBefore->getParent();
+            for (auto current = ++checkInfos.begin(); current != checkInfos.end(); current++) 
+                NCD = domTree.findNearestCommonDominator(NCD, (*current)->insertBefore->getParent());
+
+            // find a suitable insertBefore in the NCD: should come before all checkInfos, but after the trackedBase
+            auto insertBefore = NCD->getTerminator();
+            for (auto checkInfo : checkInfos)
+                if (checkInfo->insertBefore->getParent() == NCD)
+                    if (checkInfo->insertBefore->comesBefore(insertBefore))
+                        insertBefore = checkInfo->insertBefore;
+
+            // precompute radix from base
+            auto baseAsInt = createBitOrPointerCastIfNecessary(trackedBase, int64Ty, "", insertBefore);
+            auto radix = radixDecoder.computeRadix(baseAsInt, insertBefore);
+
+            // precompute "origObj" value with toptag in lower bits: most often needed value at arithderef sites
+            auto topTag = computeTopTag(baseAsInt, radix, insertBefore);
+            auto origObj = llvm::BinaryOperator::CreateLShr(baseAsInt, radix, "", insertBefore);
+            origObj = llvm::BinaryOperator::CreateAnd(origObj, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, ~((1ULL << TAG_WIDTH) - 1)}), "", insertBefore); // clear iptag bits
+            origObj = llvm::BinaryOperator::CreateOr(origObj, topTag, "", insertBefore);
+
+            baseToBasePtrInfo[trackedBase][func] = {radix, origObj};
+        }
+    }
+
     // now insert an arithmetic & tag check at all dereference sites
     llvm::DenseSet<llvm::Use*> replacedUses;
     for (auto& [checkInfo, usesToReplace] : checkInfoToUses) {
@@ -404,15 +438,13 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
         auto checkArithBool = llvm::ConstantInt::getBool(boolTy, checkInfo->shouldCheckArith());
         llvm::CallInst::Create(noob_access_check_fn, {ptrAsInt8Ptr, baseAsInt8Ptr, checkDerefBool, checkArithBool}, "", insertBefore);
 #else
-        // compute radix from base! otherwise potentially overwritten in ptr
-        auto baseAsInt = llvm::CastInst::CreateBitOrPointerCast(checkInfo->trackedBase, int64Ty, "", insertBefore);
-        auto radix = radixDecoder.computeRadix(baseAsInt, insertBefore);
+        auto basePtrInfo = baseToBasePtrInfo.find(checkInfo->trackedBase)->getSecond().find(checkInfo->insertBefore->getFunction())->getSecond();
 
         if (checkInfo->shouldCheckDereference()) {
             assert(!checkInfo->isEscapeSite);
             assert(CHECK_POINTER_DEREFERENCES);
             assert(CHECK_DEREFERENCE_SITES); // should never deref check escape sites
-            auto poisonMask = computePoisonMaskAtDerefSite(*checkInfo, baseAsInt, radix, insertBefore);
+            auto poisonMask = computePoisonMaskAtDerefSite(*checkInfo, basePtrInfo, insertBefore);
             if (checkInfo->isRangeCheck()) {
                 assert(!checkInfo->unsoundlyHoisted);
                 // crucial: make sure the pointer being poisoned later on is the actual start value of the loop
@@ -451,6 +483,9 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, const llvm::
             assert(CHECK_POINTER_ARITHMETIC);
             assert(CHECK_ESCAPE_SITES); // should never elide deref checking on deref sites
             ASSERT_ELSE_UNKOWN(!checkInfo->isRangeCheck(), checkInfo->pointerOperand); // our typical range check poisoning approach wouldnt work here
+
+            auto baseAsInt = llvm::CastInst::CreateBitOrPointerCast(checkInfo->trackedBase, int64Ty, "", insertBefore);
+            auto radix = basePtrInfo.radix;
 
             // maskForInvariantBits = (~0ULL) << (radix + TAG_WIDTH + ARITH_LEEWAY_WIDTH);
             // = (~0ULL << (TAG_WIDTH + ARITH_LEEWAY_WIDTH)) << radix
@@ -637,7 +672,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
     //  this is because the baseptrtracker will look right through our tag embedding or unsafe stack alloc
     auto checkInfoToUses = createInstrumentationPlans(module, MAM);
     // now actually instrument pointer arithmetic and dereferences
-    applyNOOBChecks(module, checkInfoToUses);
+    applyNOOBChecks(module, MAM, checkInfoToUses);
 
     // now, start instrumenting globals & allocas
     std::string noobLinkerScript {
