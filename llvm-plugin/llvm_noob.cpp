@@ -483,32 +483,19 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
             assert(CHECK_ESCAPE_SITES); // should never elide deref checking on deref sites
             ASSERT_ELSE_UNKOWN(!checkInfo->isRangeCheck(), checkInfo->pointerOperand); // our typical range check poisoning approach wouldnt work here
 
-            auto baseAsInt = llvm::CastInst::CreateBitOrPointerCast(checkInfo->trackedBase, int64Ty, "", insertBefore);
             auto radix = basePtrInfo.radix;
 
-            // maskForInvariantBits = (~0ULL) << (radix + TAG_WIDTH + ARITH_LEEWAY_WIDTH);
-            // = (~0ULL << (TAG_WIDTH + ARITH_LEEWAY_WIDTH)) << radix
-            llvm::Value* maskInvariantBits = llvm::ConstantExpr::getShl(
-                llvm::Constant::getAllOnesValue(int64Ty),
-                llvm::Constant::getIntegerValue(int64Ty, llvm::APInt{64, TAG_WIDTH + ARITH_LEEWAY_WIDTH})
-            );
-            maskInvariantBits = llvm::BinaryOperator::CreateNSWShl(
-                maskInvariantBits,
-                radix,
-                "",
-                insertBefore
-            );
-            auto arithAreaBase = llvm::BinaryOperator::CreateAnd(maskInvariantBits, baseAsInt, "", insertBefore);
-            auto arithAreaSize = llvm::BinaryOperator::CreateXor(
-                maskInvariantBits, 
-                llvm::Constant::getIntegerValue(int64Ty, llvm::APInt{64, static_cast<uint64_t>(-1), true}), 
-                "", 
-                insertBefore
-            );
-            auto provenancedSafePtr = computeSafeInArithAreaPtr(checkInfo->pointerOperand, arithAreaSize, arithAreaBase, checkInfo->trackedBase, insertBefore);
-            checkInfo->pointerOperand = provenancedSafePtr;
-            // make sure later code still observes this as a non-range check
-            checkInfo->endOfAddressRange = checkInfo->pointerOperand;
+            // compute the arena identifiers for both base & offset ptr
+            auto radixPlusTW = llvm::BinaryOperator::CreateAdd(radix, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, TAG_WIDTH}), "", insertBefore);
+            auto baseAsInt = createBitOrPointerCastIfNecessary(checkInfo->trackedBase, int64Ty, "", insertBefore);
+            auto basearena = llvm::BinaryOperator::CreateLShr(baseAsInt, radixPlusTW, "", insertBefore);
+            auto ptrAsInt = createBitOrPointerCastIfNecessary(checkInfo->pointerOperand, int64Ty, "", insertBefore);
+            auto ptrarena = llvm::BinaryOperator::CreateLShr(ptrAsInt, radixPlusTW, "", insertBefore);
+
+            // compare them
+            auto poison = llvm::BinaryOperator::CreateXor(basearena, ptrarena, "", insertBefore);
+            // we always use branching checks here
+            llvm::CallInst::Create(noob_assert_zero_fn, {poison}, "", insertBefore);
         }
 
         // now replace all uses that are checked by this pointeroperand
