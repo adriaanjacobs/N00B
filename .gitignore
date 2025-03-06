@@ -23,5 +23,7 @@
 !patches/
 !patches/**/
 
+!results/
+
 !test/
 !test/**/
