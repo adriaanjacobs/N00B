@@ -31,19 +31,21 @@ def plot_results_from_csv(csv_filename):
     # Add geomean to the dataframe
     df.loc[len(df)] = ['geomean', 1.0, geomean_N00B, 1.0, 1.0, geomean_N00B, geomean_N00Balloc]
 
-    # Plotting
-    # Figure size - make it narrower and slightly taller to accommodate stacked content
+    # Figure size
     plt.figure(figsize=(8, 3))
+
     x = np.arange(len(df))
-    width = 0.25  # Changed from 0.35
+    width = 0.35  # Increased from 0.25 to create more space between siblings
+    spacing = 0.02  # Additional offset between bars
 
     # Create bars with colorblind-friendly colors AND hatches
-    bars1 = plt.bar(x - width/2, df['N00Balloc_ratio'], width, 
+    bars1 = plt.bar(x - (width/2 + spacing), df['N00Balloc_ratio'], width, 
                     label='N00Balloc', 
                     color='#004488')  # dark blue
-    bars2 = plt.bar(x + width/2, df['N00B_ratio'], width, 
+    bars2 = plt.bar(x + (width/2 + spacing), df['N00B_ratio'], width, 
                     label='N00B', 
                     color='#EE7733')  # dark orange
+
 
     # Add value labels on top of each bar
     def autolabel(bars, ratios):
@@ -68,7 +70,7 @@ def plot_results_from_csv(csv_filename):
     # Convert last label to bold
     labels[-1] = r'$\mathbf{geomean}$'
 
-    plt.xlabel(df.columns[0], fontsize=11)  # Smaller x-axis label
+    # plt.xlabel(df.columns[0], fontsize=11)  # Smaller x-axis label
     plt.ylabel('Run-Time Ratio', fontsize=11)  # Smaller y-axis label
     plt.xticks(x, labels, rotation=25, ha='right', fontsize=11)  # Apply updated labels
     plt.yticks(fontsize=11)  # Smaller y-axis ticks
@@ -78,28 +80,30 @@ def plot_results_from_csv(csv_filename):
     plt.axhline(y=1.0, color='black', linestyle='-', alpha=0.2)
     plt.axhline(y=1.5, color='red', linestyle='--', alpha=0.3)  # Removed label parameter
 
-    # Adjust y-axis to leave some space at top and bottom
+    # Adjust y-axis to leave proportional space at top and bottom
     ymax = max(df['N00B_ratio'].max(), df['N00Balloc_ratio'].max())
     ymin = min(df['N00B_ratio'].min(), df['N00Balloc_ratio'].min())
-    plt.ylim(ymin * 0.95, ymax * 1.1)  # 5% margin below, 10% margin above
+    
+    # Calculate space needed for bar labels
+    label_height = 0.3 
+    
+    plt.ylim(ymin * 0.95, ymax + label_height)
 
     # Add specific tick at y=1.5
     yticks = plt.yticks()[0]  # Get current ticks
     if 1.5 not in yticks:
-        plt.yticks(sorted(list(yticks) + [1.5]))  # Add 1.5 to existing ticks
+        plt.yticks(sorted(list(yticks) + [1.5]))
 
     # Place legend at bottom right, below x-axis labels, with items side by side
     plt.legend(prop={'family': 'monospace', 'size': 11},
-            loc='best',
-            #   bbox_to_anchor=(0,0),
+            loc='upper right',
+            bbox_to_anchor=(1,1.16),
             ncol=2)  # Changed from 1 to 2 to place items side by side
-
-    # Adjust bottom margin to make room for legend
-    plt.subplots_adjust(bottom=0.3)
 
     # Save the plot as PDF with tight layout to include legend
     pdf_filename = f"{csv_filename}.pdf"
-    plt.savefig(pdf_filename, bbox_inches='tight')
+    plt.savefig(pdf_filename, bbox_inches='tight', pad_inches=0)
+    print(f"Saved to {pdf_filename}")
     plt.close()
 
 
