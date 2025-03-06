@@ -449,11 +449,6 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
     // now insert an arithmetic & tag check at all dereference sites
     llvm::DenseSet<llvm::Use*> replacedUses;
     for (auto& [checkInfo, usesToReplace] : checkInfoToUses) {
-        if (checkInfo->isRangeCheck()) {
-            // wouldnt know why such checks would ever be pruned here
-            assert(checkInfo->shouldCheckDereference());
-        }
-
         auto insertBefore = checkInfo->insertBefore;
 
 #if EMIT_RUNTIME_CALLS
@@ -482,6 +477,11 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
             auto trapIfNotZero = llvm::CallInst::Create(noob_assert_zero_fn, {poison}, "", insertBefore);
         }
 #else
+        if (checkInfo->isRangeCheck()) {
+            // wouldnt know why such checks would ever be pruned here
+            assert(checkInfo->shouldCheckDereference());
+        }
+
         if (checkInfo->shouldCheckDereference()) {
             assert(!checkInfo->isEscapeSite);
             assert(CHECK_POINTER_DEREFERENCES);
