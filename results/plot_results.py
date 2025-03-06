@@ -72,7 +72,7 @@ def plot_results_from_csv(csv_filename):
 
     # plt.xlabel(df.columns[0], fontsize=11)  # Smaller x-axis label
     plt.ylabel('Run-Time Ratio', fontsize=11)  # Smaller y-axis label
-    plt.xticks(x, labels, rotation=25, ha='right', fontsize=11)  # Apply updated labels
+    plt.xticks(x, labels, rotation=35, ha='right', fontsize=11)  # Apply updated labels
     plt.yticks(fontsize=11)  # Smaller y-axis ticks
     plt.grid(True, axis='y')
 
