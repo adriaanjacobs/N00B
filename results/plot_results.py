@@ -39,7 +39,7 @@ def plot_results_from_csv(csv_filename):
     result_rows = []
     result_rows.extend(df_2006.to_dict('records'))
     result_rows.append({
-        'SPEC CPU 2006': 'CPU2006 geomean',
+        'SPEC CPU 2006': '2006 geomean',
         'baseline': np.nan,
         'N00B': np.nan,
         'N00Balloc': np.nan,
@@ -58,7 +58,7 @@ def plot_results_from_csv(csv_filename):
     })
     result_rows.extend(df_2017.to_dict('records'))
     result_rows.append({
-        'SPEC CPU 2006': 'CPU2017 geomean',
+        'SPEC CPU 2006': '2017 geomean',
         'baseline': np.nan,
         'N00B': np.nan,
         'N00Balloc': np.nan,
@@ -130,11 +130,13 @@ def plot_results_from_csv(csv_filename):
         if 'geomean' in str(label):
             labels[i] = r'$\mathbf{' + label.replace(' ', '\ ') + '}$'
 
-
     # plt.xlabel(df.columns[0], fontsize=11)  # Smaller x-axis label
     plt.ylabel('Run-Time Ratio', fontsize=11)  # Smaller y-axis label
-    plt.xticks(x, labels, rotation=35, ha='right', fontsize=11)  # Apply updated labels
+    # Adjust x-axis label positioning
+    plt.xticks(x, labels, rotation=35, ha='right', fontsize=11)  # Added x offset
+    plt.tick_params(axis='x', which='major', pad=0) # Remove padding between ticks and labels
     plt.yticks(fontsize=11)  # Smaller y-axis ticks
+    plt.tick_params(axis='y', which='major', pad=0) # Remove padding between ticks and labels
     plt.grid(True, axis='y')
 
     # Add horizontal lines at y=1.0 and y=1.5

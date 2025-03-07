@@ -1,4 +1,4 @@
-SPEC CPU2006 benchmark,baseline,N00B,N00Balloc
+SPEC CPU 2006,baseline,N00B,N00Balloc
 400.perlbench,286,555,298
 401.bzip2,543,800,539
 403.gcc,212,326,227
@@ -18,3 +18,16 @@ SPEC CPU2006 benchmark,baseline,N00B,N00Balloc
 453.povray,100,218,"97,5"
 470.lbm,162,179,162
 482.sphinx3,439,603,436
+SPECspeed 2017,baseline,N00B,N00Balloc
+600.perlbench_s,390,1086,404
+602.gcc_s,568,976,608
+605.mcf_s,868,1183,865
+620.omnetpp_s,437,728,482
+623.xalancbmk_s,304,418,254
+625.x264_s,265,418,268
+631.deepsjeng_s,440,610,431
+641.leela_s,574,837,572
+657.xz_s ,3385,3978,3387
+619.lbm_s,1138,1059,1140
+638.imagick_s,5608,5899,5594
+644.nab_s,1692,2424,1694
