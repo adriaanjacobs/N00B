@@ -8,31 +8,88 @@ import sys
 
 def plot_results_from_csv(csv_filename):
     # Read the CSV file, forcing string type for numeric columns
-    df = pd.read_csv(csv_filename, dtype={'baseline': str, 'N00B': str, 'N00Balloc': str})
-
+    df = pd.read_csv(csv_filename)
+    
     # Convert comma decimal separators to periods and convert to float
     for col in ['baseline', 'N00B', 'N00Balloc']:
-        df[col] = df[col].str.replace(',', '.').astype(float)
+        df[col] = pd.to_numeric(df[col].str.replace(',', '.'), errors='coerce')
 
-    # Handle empty/NaN values in N00B column
-    df['N00B'] = pd.to_numeric(df['N00B'], errors='coerce')
-
-    # Calculate the virtual baseline (minimum of baseline and N00Balloc)
+    # Calculate ratios
     df['virtual_baseline'] = df[['baseline', 'N00Balloc']].min(axis=1)
-
-    # Calculate ratios, handling NaN values
     df['N00B_ratio'] = df['N00B'] / df['virtual_baseline']
     df['N00Balloc_ratio'] = df['N00Balloc'] / df['baseline']
 
-    # Calculate geometric means (excluding NaN values)
-    geomean_N00B = np.exp(np.mean(np.log(df['N00B_ratio'].dropna())))
-    geomean_N00Balloc = np.exp(np.mean(np.log(df['N00Balloc_ratio'])))
+        # Split into separate dataframes
+    df_2006 = df[~df.iloc[:, 0].str.contains('_s|SPECspeed', na=False)].copy()  # No _s suffix and not the header
+    df_2017 = df[df.iloc[:, 0].str.contains('_s', na=False)].copy()  # Only benchmarks with _s suffix
+    
+    # Calculate geometric means for each suite
+    geomean_2006_N00B = np.exp(np.mean(np.log(df_2006['N00B_ratio'].dropna())))
+    geomean_2006_N00Balloc = np.exp(np.mean(np.log(df_2006['N00Balloc_ratio'].dropna())))
+    
+    geomean_2017_N00B = np.exp(np.mean(np.log(df_2017['N00B_ratio'].dropna())))
+    geomean_2017_N00Balloc = np.exp(np.mean(np.log(df_2017['N00Balloc_ratio'].dropna())))
+    
+    # Calculate overall geometric mean
+    df_all = pd.concat([df_2006, df_2017])
+    geomean_N00B = np.exp(np.mean(np.log(df_all['N00B_ratio'].dropna())))
+    geomean_N00Balloc = np.exp(np.mean(np.log(df_all['N00Balloc_ratio'].dropna())))
 
-    # Add geomean to the dataframe
-    df.loc[len(df)] = ['geomean', 1.0, geomean_N00B, 1.0, 1.0, geomean_N00B, geomean_N00Balloc]
+    # Create result dataframe in desired order
+    result_rows = []
+    result_rows.extend(df_2006.to_dict('records'))
+    result_rows.append({
+        'SPEC CPU 2006': 'CPU2006 geomean',
+        'baseline': np.nan,
+        'N00B': np.nan,
+        'N00Balloc': np.nan,
+        'virtual_baseline': np.nan,
+        'N00B_ratio': geomean_2006_N00B,
+        'N00Balloc_ratio': geomean_2006_N00Balloc
+    })
+    result_rows.append({  # Empty row for spacing
+        'SPEC CPU 2006': '',
+        'baseline': np.nan,
+        'N00B': np.nan,
+        'N00Balloc': np.nan,
+        'virtual_baseline': np.nan,
+        'N00B_ratio': np.nan,
+        'N00Balloc_ratio': np.nan
+    })
+    result_rows.extend(df_2017.to_dict('records'))
+    result_rows.append({
+        'SPEC CPU 2006': 'CPU2017 geomean',
+        'baseline': np.nan,
+        'N00B': np.nan,
+        'N00Balloc': np.nan,
+        'virtual_baseline': np.nan,
+        'N00B_ratio': geomean_2017_N00B,
+        'N00Balloc_ratio': geomean_2017_N00Balloc
+    })
+    result_rows.append({  # Empty row for spacing before overall geomean
+        'SPEC CPU 2006': '',
+        'baseline': np.nan,
+        'N00B': np.nan,
+        'N00Balloc': np.nan,
+        'virtual_baseline': np.nan,
+        'N00B_ratio': np.nan,
+        'N00Balloc_ratio': np.nan
+    })
+    result_rows.append({
+        'SPEC CPU 2006': 'overall geomean',
+        'baseline': np.nan,
+        'N00B': np.nan,
+        'N00Balloc': np.nan,
+        'virtual_baseline': np.nan,
+        'N00B_ratio': geomean_N00B,
+        'N00Balloc_ratio': geomean_N00Balloc
+    })
+
+    # Create final dataframe
+    df = pd.DataFrame(result_rows)
 
     # Figure size
-    plt.figure(figsize=(8, 3))
+    plt.figure(figsize=(14, 3))
 
     x = np.arange(len(df))
     width = 0.35  # Increased from 0.25 to create more space between siblings
@@ -46,13 +103,15 @@ def plot_results_from_csv(csv_filename):
                     label='N00B', 
                     color='#EE7733')  # dark orange
 
+    # Set x-axis limits with a bit more padding
+    plt.xlim(-0.75, len(df) - 0.25)  # Changed from -0.5 and -0.5 to add more space
 
     # Add value labels on top of each bar
     def autolabel(bars, ratios):
         for idx, (bar, ratio) in enumerate(zip(bars, ratios)):
             if not pd.isna(ratio):  # Only label if value exists
                 height = bar.get_height()
-                weight = 'bold' if idx == len(bars)-1 else 'normal'
+                weight = 'bold' if 'geomean' in str(df.iloc[idx, 0]) else 'normal'
                 plt.text(bar.get_x() + bar.get_width()/2., height,
                         f'{height:.2f}',
                         ha='center',
@@ -65,10 +124,12 @@ def plot_results_from_csv(csv_filename):
     autolabel(bars1, df['N00Balloc_ratio'])
     autolabel(bars2, df['N00B_ratio'])
 
-    # Bold the 'geomean' text in x-axis labels
+    # Bold all geomean labels in x-axis labels
     labels = df.iloc[:, 0].tolist()
-    # Convert last label to bold
-    labels[-1] = r'$\mathbf{geomean}$'
+    for i, label in enumerate(labels):
+        if 'geomean' in str(label):
+            labels[i] = r'$\mathbf{' + label.replace(' ', '\ ') + '}$'
+
 
     # plt.xlabel(df.columns[0], fontsize=11)  # Smaller x-axis label
     plt.ylabel('Run-Time Ratio', fontsize=11)  # Smaller y-axis label
