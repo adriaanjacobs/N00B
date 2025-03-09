@@ -410,7 +410,7 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
             // do a little bit of hoisting here: if the baseobj/radix precomputation unnecessarily happens in a loop, hoist it
             auto trackedBaseDominates = [&,&trackedBase=trackedBase] (llvm::Instruction* loc) -> bool {
                 // 453.povray _actually_ has a *(null + 32-bit value). When that executes, we'll simply trigger a crash.
-                if (llvm::isa<llvm::Argument, llvm::GlobalVariable, llvm::ConstantPointerNull>(trackedBase))
+                if (!llvm::isa<llvm::Instruction>(trackedBase))
                     return true;
                 auto trackedBaseInst = llvm::dyn_cast<llvm::Instruction>(trackedBase);
                 ASSERT_ELSE_UNKOWN(trackedBaseInst, trackedBase);
