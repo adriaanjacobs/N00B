@@ -165,11 +165,19 @@ def plot_results_from_csv(csv_filename):
     # Adjust y-axis to leave proportional space at top and bottom
     ymax = max(df['N00B_ratio'].max(), df['N00Balloc_ratio'].max(), df['LowFat_ratio'].max())
     ymin = min(df['N00B_ratio'].min(), df['N00Balloc_ratio'].min(), df['LowFat_ratio'].min())
+    bottom_line = ymin * 0.95
     
     # Calculate space needed for bar labels
     label_height = 0.3 
     
-    plt.ylim(ymin * 0.95, ymax + label_height)
+    plt.ylim(bottom_line, ymax + label_height)
+
+    # Add bottom value label
+    ax = plt.gca()
+    ax.text(0.0, bottom_line, f'{bottom_line:.2f}', 
+            ha='right', va='top',  # Align top-right of text with point
+            fontsize=11,  # Match other tick labels
+            transform=ax.get_yaxis_transform())  # Use axis coordinates
 
     # Add specific tick at y=1.5
     yticks = plt.yticks()[0]  # Get current ticks
