@@ -196,10 +196,18 @@ def plot_results_from_csv(csv_filename):
             bbox_to_anchor=(1,1.16),
             ncol=3)  # Changed to 3 columns
 
-    # Save the plot as PDF with tight layout to include legend
+    # Save the plot as both PDF and PNG
     pdf_filename = f"{csv_filename}.pdf"
+    png_filename = f"{csv_filename}.png"
+    
+    # Save PDF with tight layout
     plt.savefig(pdf_filename, bbox_inches='tight', pad_inches=0)
     print(f"Saved to {pdf_filename}")
+    
+    # Save PNG with higher DPI for better quality in presentations
+    plt.savefig(png_filename, bbox_inches='tight', pad_inches=0, dpi=300, format='png')
+    print(f"Saved to {png_filename}")
+    
     plt.close()
 
 
