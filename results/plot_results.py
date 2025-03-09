@@ -131,8 +131,10 @@ def plot_results_from_csv(csv_filename):
             if not pd.isna(ratio):  # Only label if value exists
                 height = bar.get_height()
                 weight = 'bold' if 'geomean' in str(df.iloc[idx, 0]) else 'normal'
-                # Check if original value had a star
-                has_star = stars[column][idx] if idx < len(stars[column]) else False
+                # Find the corresponding index in the original data
+                benchmark_name = df.iloc[idx, 0]
+                original_idx = df_all[df_all.iloc[:, 0] == benchmark_name].index[0] if benchmark_name in df_all.iloc[:, 0].values else -1
+                has_star = stars[column][original_idx] if original_idx >= 0 and original_idx < len(stars[column]) else False
                 label = f'{height:.2f}{"*" if has_star else ""}'
                 plt.text(bar.get_x() + bar.get_width()/2., height,
                         label,
