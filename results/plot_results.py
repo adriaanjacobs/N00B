@@ -11,29 +11,33 @@ def plot_results_from_csv(csv_filename):
     df = pd.read_csv(csv_filename)
     
     # Convert comma decimal separators to periods and convert to float
-    for col in ['baseline', 'N00B', 'N00Balloc']:
+    for col in ['baseline', 'N00B', 'N00Balloc', 'LowFat']:
         df[col] = pd.to_numeric(df[col].str.replace(',', '.'), errors='coerce')
 
     # Calculate ratios
     df['virtual_baseline'] = df[['baseline', 'N00Balloc']].min(axis=1)
     df['N00B_ratio'] = df['N00B'] / df['virtual_baseline']
     df['N00Balloc_ratio'] = df['N00Balloc'] / df['baseline']
+    df['LowFat_ratio'] = df['LowFat'] / df['virtual_baseline']  # Add LowFat ratio
 
-        # Split into separate dataframes
+    # Split into separate dataframes
     df_2006 = df[~df.iloc[:, 0].str.contains('_s|SPECspeed', na=False)].copy()  # No _s suffix and not the header
     df_2017 = df[df.iloc[:, 0].str.contains('_s', na=False)].copy()  # Only benchmarks with _s suffix
     
     # Calculate geometric means for each suite
     geomean_2006_N00B = np.exp(np.mean(np.log(df_2006['N00B_ratio'].dropna())))
     geomean_2006_N00Balloc = np.exp(np.mean(np.log(df_2006['N00Balloc_ratio'].dropna())))
+    geomean_2006_LowFat = np.exp(np.mean(np.log(df_2006['LowFat_ratio'].dropna())))  # Add LowFat geomean
     
     geomean_2017_N00B = np.exp(np.mean(np.log(df_2017['N00B_ratio'].dropna())))
     geomean_2017_N00Balloc = np.exp(np.mean(np.log(df_2017['N00Balloc_ratio'].dropna())))
+    geomean_2017_LowFat = np.exp(np.mean(np.log(df_2017['LowFat_ratio'].dropna())))  # Add LowFat geomean
     
     # Calculate overall geometric mean
     df_all = pd.concat([df_2006, df_2017])
     geomean_N00B = np.exp(np.mean(np.log(df_all['N00B_ratio'].dropna())))
     geomean_N00Balloc = np.exp(np.mean(np.log(df_all['N00Balloc_ratio'].dropna())))
+    geomean_LowFat = np.exp(np.mean(np.log(df_all['LowFat_ratio'].dropna())))  # Add LowFat geomean
 
     # Create result dataframe in desired order
     result_rows = []
@@ -43,18 +47,22 @@ def plot_results_from_csv(csv_filename):
         'baseline': np.nan,
         'N00B': np.nan,
         'N00Balloc': np.nan,
+        'LowFat': np.nan,  # Add LowFat
         'virtual_baseline': np.nan,
         'N00B_ratio': geomean_2006_N00B,
-        'N00Balloc_ratio': geomean_2006_N00Balloc
+        'N00Balloc_ratio': geomean_2006_N00Balloc,
+        'LowFat_ratio': geomean_2006_LowFat  # Add LowFat ratio
     })
     result_rows.append({  # Empty row for spacing
         'SPEC CPU 2006': '',
         'baseline': np.nan,
         'N00B': np.nan,
         'N00Balloc': np.nan,
+        'LowFat': np.nan,  # Add LowFat
         'virtual_baseline': np.nan,
         'N00B_ratio': np.nan,
-        'N00Balloc_ratio': np.nan
+        'N00Balloc_ratio': np.nan,
+        'LowFat_ratio': np.nan  # Add LowFat ratio
     })
     result_rows.extend(df_2017.to_dict('records'))
     result_rows.append({
@@ -62,44 +70,53 @@ def plot_results_from_csv(csv_filename):
         'baseline': np.nan,
         'N00B': np.nan,
         'N00Balloc': np.nan,
+        'LowFat': np.nan,  # Add LowFat
         'virtual_baseline': np.nan,
         'N00B_ratio': geomean_2017_N00B,
-        'N00Balloc_ratio': geomean_2017_N00Balloc
+        'N00Balloc_ratio': geomean_2017_N00Balloc,
+        'LowFat_ratio': geomean_2017_LowFat  # Add LowFat ratio
     })
     result_rows.append({  # Empty row for spacing before overall geomean
         'SPEC CPU 2006': '',
         'baseline': np.nan,
         'N00B': np.nan,
         'N00Balloc': np.nan,
+        'LowFat': np.nan,  # Add LowFat
         'virtual_baseline': np.nan,
         'N00B_ratio': np.nan,
-        'N00Balloc_ratio': np.nan
+        'N00Balloc_ratio': np.nan,
+        'LowFat_ratio': np.nan  # Add LowFat ratio
     })
     result_rows.append({
         'SPEC CPU 2006': 'overall geomean',
         'baseline': np.nan,
         'N00B': np.nan,
         'N00Balloc': np.nan,
+        'LowFat': np.nan,  # Add LowFat
         'virtual_baseline': np.nan,
         'N00B_ratio': geomean_N00B,
-        'N00Balloc_ratio': geomean_N00Balloc
+        'N00Balloc_ratio': geomean_N00Balloc,
+        'LowFat_ratio': geomean_LowFat  # Add LowFat ratio
     })
 
     # Create final dataframe
     df = pd.DataFrame(result_rows)
 
     # Figure size
-    plt.figure(figsize=(14, 3))
+    plt.figure(figsize=(17, 3))
 
     x = np.arange(len(df))
-    width = 0.35  # Increased from 0.25 to create more space between siblings
+    width = 0.25  # Reduced width to fit three bars
     spacing = 0.02  # Additional offset between bars
 
     # Create bars with colorblind-friendly colors AND hatches
-    bars1 = plt.bar(x - (width/2 + spacing), df['N00Balloc_ratio'], width, 
+    bars1 = plt.bar(x - width - spacing, df['N00Balloc_ratio'], width, 
                     label='N00Balloc', 
                     color='#004488')  # dark blue
-    bars2 = plt.bar(x + (width/2 + spacing), df['N00B_ratio'], width, 
+    bars2 = plt.bar(x, df['LowFat_ratio'], width,
+                    label='LowFat',
+                    color='#009988')  # teal
+    bars3 = plt.bar(x + width + spacing, df['N00B_ratio'], width, 
                     label='N00B', 
                     color='#EE7733')  # dark orange
 
@@ -118,11 +135,13 @@ def plot_results_from_csv(csv_filename):
                         va='bottom',
                         rotation=90,
                         family='monospace',
-                        fontsize=10,
+                        fontsize=9,
                         weight=weight)
 
+    # Add bar labels in the same order
     autolabel(bars1, df['N00Balloc_ratio'])
-    autolabel(bars2, df['N00B_ratio'])
+    autolabel(bars2, df['LowFat_ratio'])
+    autolabel(bars3, df['N00B_ratio'])
 
     # Bold all geomean labels in x-axis labels
     labels = df.iloc[:, 0].tolist()
@@ -144,8 +163,8 @@ def plot_results_from_csv(csv_filename):
     plt.axhline(y=1.5, color='red', linestyle='--', alpha=0.3)  # Removed label parameter
 
     # Adjust y-axis to leave proportional space at top and bottom
-    ymax = max(df['N00B_ratio'].max(), df['N00Balloc_ratio'].max())
-    ymin = min(df['N00B_ratio'].min(), df['N00Balloc_ratio'].min())
+    ymax = max(df['N00B_ratio'].max(), df['N00Balloc_ratio'].max(), df['LowFat_ratio'].max())
+    ymin = min(df['N00B_ratio'].min(), df['N00Balloc_ratio'].min(), df['LowFat_ratio'].min())
     
     # Calculate space needed for bar labels
     label_height = 0.3 
@@ -161,7 +180,7 @@ def plot_results_from_csv(csv_filename):
     plt.legend(prop={'family': 'monospace', 'size': 11},
             loc='upper right',
             bbox_to_anchor=(1,1.16),
-            ncol=2)  # Changed from 1 to 2 to place items side by side
+            ncol=3)  # Changed to 3 columns
 
     # Save the plot as PDF with tight layout to include legend
     pdf_filename = f"{csv_filename}.pdf"
