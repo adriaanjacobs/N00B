@@ -7,12 +7,15 @@ import sys
 
 
 def plot_results_from_csv(csv_filename):
-    # Read the CSV file, forcing string type for numeric columns
+    # Read the CSV file
     df = pd.read_csv(csv_filename)
     
-    # Convert comma decimal separators to periods and convert to float
+    # Store which values have stars before converting
+    stars = {}
     for col in ['baseline', 'N00B', 'N00Balloc', 'LowFat']:
-        df[col] = pd.to_numeric(df[col].str.replace(',', '.'), errors='coerce')
+        stars[col] = df[col].astype(str).str.contains('\*')
+        # Remove stars and convert comma decimals before converting to float
+        df[col] = pd.to_numeric(df[col].astype(str).str.replace('*', '').str.replace(',', '.'), errors='coerce')
 
     # Calculate ratios
     df['virtual_baseline'] = df[['baseline', 'N00Balloc']].min(axis=1)
@@ -123,14 +126,16 @@ def plot_results_from_csv(csv_filename):
     # Set x-axis limits with a bit more padding
     plt.xlim(-0.75, len(df) - 0.25)  # Changed from -0.5 and -0.5 to add more space
 
-    # Add value labels on top of each bar
-    def autolabel(bars, ratios):
+    def autolabel(bars, ratios, column):
         for idx, (bar, ratio) in enumerate(zip(bars, ratios)):
             if not pd.isna(ratio):  # Only label if value exists
                 height = bar.get_height()
                 weight = 'bold' if 'geomean' in str(df.iloc[idx, 0]) else 'normal'
+                # Check if original value had a star
+                has_star = stars[column][idx] if idx < len(stars[column]) else False
+                label = f'{height:.2f}{"*" if has_star else ""}'
                 plt.text(bar.get_x() + bar.get_width()/2., height,
-                        f'{height:.2f}',
+                        label,
                         ha='center',
                         va='bottom',
                         rotation=90,
@@ -138,10 +143,11 @@ def plot_results_from_csv(csv_filename):
                         fontsize=9,
                         weight=weight)
 
-    # Add bar labels in the same order
-    autolabel(bars1, df['N00Balloc_ratio'])
-    autolabel(bars2, df['LowFat_ratio'])
-    autolabel(bars3, df['N00B_ratio'])
+    # Add bar labels in the same order with corresponding column names
+    autolabel(bars1, df['N00Balloc_ratio'], 'N00Balloc')
+    autolabel(bars2, df['LowFat_ratio'], 'LowFat')
+    autolabel(bars3, df['N00B_ratio'], 'N00B')
+
 
     # Bold all geomean labels in x-axis labels
     labels = df.iloc[:, 0].tolist()
