@@ -65,5 +65,9 @@ for bench_dir in BENCHSPEC_DIR.iterdir():
 # Print results in SPEC order
 print(f"{'Benchmark':20s} {'RSS(MB)':>10s}")
 for bench in BENCH_ORDER:
+    print(f"{bench:<20s}: ", end="")
     if bench in rss_data:
-        print(f"{bench:<20s} {rss_data[bench]:10.1f}")
+        print(f"{rss_data[bench]:10.1f}")
+    else:
+        print("")
+
