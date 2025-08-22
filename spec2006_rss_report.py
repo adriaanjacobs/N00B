@@ -52,7 +52,7 @@ for bench_dir in BENCHSPEC_DIR.iterdir():
     time_log = max(time_logs, key=lambda p: p.stat().st_mtime)
 
     # Extract benchmark name from path
-    benchmark_name = time_log.parts[6]
+    benchmark_name = time_log.parts[-4]
 
     # Parse RSS
     with open(time_log) as f:
@@ -70,4 +70,3 @@ for bench in BENCH_ORDER:
         print(f"{rss_data[bench]:10.1f}")
     else:
         print("")
-
