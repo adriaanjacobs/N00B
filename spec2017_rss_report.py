@@ -33,19 +33,26 @@ def collect_data():
     for logfile in ROOT.glob("benchspec/CPU/*/run/*/time.log"):
         parts = logfile.parts
         benchmark = parts[-4]  # e.g. "600.perlbench_s"
+        rundir = parts[-2]     # e.g. "run_base_refrate_gcc-m64.0000"
+
         rss = parse_rss(logfile)
-        if rss is not None:
-            results[benchmark] = rss
+        if rss is None:
+            continue
+
+        # Keep only the most recent logfile per benchmark
+        mtime = logfile.stat().st_mtime
+        if benchmark not in results or mtime > results[benchmark]["mtime"]:
+            results[benchmark] = {"rss": rss, "rundir": rundir, "mtime": mtime}
     return results
 
 def print_table(results):
-    print(f"{'Benchmark':20s} {'RSS(MB)':>10s}")
+    print(f"{'RunDir':35s} {'Benchmark':20s} {'RSS(MB)':>10s}")
     for bench in BENCH_ORDER:
-        rss = results.get(bench)
-        if rss is not None:
-            print(f"{bench:<20s} {rss:10.1f}")
+        entry = results.get(bench)
+        if entry:
+            print(f"{entry['rundir']:<35s} {bench:<20s} {entry['rss']:10.1f}")
         else:
-            print(f"{bench:<20s} {'':>10s}")
+            print(f"{'':35s} {bench:<20s} {'':>10s}")
 
 if __name__ == "__main__":
     data = collect_data()
