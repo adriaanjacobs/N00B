@@ -46,6 +46,7 @@ class NOOBInstrumentationPass : public llvm::PassInfoMixin<NOOBInstrumentationPa
     struct BasePtrInfo {
         llvm::Value* radix;
         llvm::Value* origObj;
+        llvm::Value* topTag;
     };
     llvm::Value* computeSafeInArithAreaPtr(llvm::Value* ptr, llvm::Value* arithAreaSize, llvm::Value* arithAreaBase, llvm::Value* trackedBase, llvm::Instruction* insertBefore);
     llvm::Value* shiftDownTillInPointerTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore);

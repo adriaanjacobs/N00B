@@ -324,13 +324,12 @@ llvm::Value* NOOBInstrumentationPass::computePoisonMaskAtDerefSite(const CheckIn
         // rarer case: we only check deref, because arith got pruned
         //  implement an even more optimized version here that solely checks deref
         // find the in pointer tag and top tag
-        const auto topTag = computeTopTag(checkInfo.trackedBase, radix, insertBefore);
         auto inPointerTag = shiftDownTillInPointerTag(checkInfo.pointerOperand, radix, insertBefore);
         // xor the iptag with the toptag
-        auto isNotInBounds = llvm::BinaryOperator::CreateXor(inPointerTag, topTag, "notinbounds", insertBefore);
+        auto isNotInBounds = llvm::BinaryOperator::CreateXor(inPointerTag, basePtrInfo.topTag, "notinbounds", insertBefore);
         if (checkInfo.isRangeCheck()) {
             auto endOfAddrIpTag = shiftDownTillInPointerTag(checkInfo.endOfAddressRange, radix, insertBefore);
-            auto endOfAddrNotInBounds = llvm::BinaryOperator::CreateXor(endOfAddrIpTag, topTag, "notinbounds", insertBefore);
+            auto endOfAddrNotInBounds = llvm::BinaryOperator::CreateXor(endOfAddrIpTag, basePtrInfo.topTag, "notinbounds", insertBefore);
             // isNotInBounds = isNotInBounds || endOfAddrNotInBounds
             isNotInBounds = llvm::BinaryOperator::CreateOr(isNotInBounds, endOfAddrNotInBounds, "notinbounds", insertBefore);
             // we're going to use this mask to embed poison bits into a pointer that we feed into a loop
@@ -431,18 +430,19 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
             auto baseAsInt = createBitOrPointerCastIfNecessary(trackedBase, int64Ty, "", insertBefore);
             auto radix = radixDecoder.computeRadix(baseAsInt, insertBefore);
 
+            auto topTag = computeTopTag(baseAsInt, radix, insertBefore);
+
 #if EMULATE_LOWFAT
             // precompute the objbase here for lowfat
             auto origObj = llvm::BinaryOperator::CreateLShr(baseAsInt, radix, "lowfat.baseobj", insertBefore);
 #else
             // precompute "origObj" value with toptag in lower bits: most often needed value at arithderef sites
-            auto topTag = computeTopTag(baseAsInt, radix, insertBefore);
             auto origObj = llvm::BinaryOperator::CreateLShr(baseAsInt, radix, "", insertBefore);
             origObj = llvm::BinaryOperator::CreateAnd(origObj, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, ~((1ULL << TAG_WIDTH) - 1)}), "", insertBefore); // clear iptag bits
             origObj = llvm::BinaryOperator::CreateOr(origObj, topTag, "", insertBefore);
 #endif
-        
-            baseToBasePtrInfo[trackedBase][func] = {radix, origObj};
+            // deref-only sites use the toptag
+            baseToBasePtrInfo[trackedBase][func] = {radix, origObj, topTag};
         }
     }
 
