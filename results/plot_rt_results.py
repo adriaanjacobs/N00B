@@ -117,7 +117,7 @@ def plot_results_from_csv(csv_filename):
                     label='N00Balloc', 
                     color='#004488')  # dark blue
     bars2 = plt.bar(x, df['LowFat_ratio'], width,
-                    label='LowFat',
+                    label='Low-Fat equivalent',
                     color='#009988')  # teal
     bars3 = plt.bar(x + width + spacing, df['N00B_ratio'], width, 
                     label='N00B', 
@@ -192,11 +192,10 @@ def plot_results_from_csv(csv_filename):
     if 1.5 not in yticks:
         plt.yticks(sorted(list(yticks) + [1.5]))
 
-    # Place legend at bottom right, below x-axis labels, with items side by side
+    # Place legend inside the plot area.
     plt.legend(prop={'family': 'monospace', 'size': 11},
             loc='upper right',
-            bbox_to_anchor=(1,1.16),
-            ncol=3)  # Changed to 3 columns
+            ncol=3)
 
     # Save the plot as both PDF and PNG
     pdf_filename = f"{csv_filename}.pdf"
