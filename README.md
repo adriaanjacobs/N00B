@@ -10,20 +10,23 @@ git submodule update
 ```
 
 ## Building
-N00B is made up of out-of-tree compiler passes for LLVM 15. For Ubuntu you can grab pre-built LLVM libraries from [LLVM's apt repositories](https://apt.llvm.org/). General instructions like so:
+N00B is made up of out-of-tree compiler passes for LLVM 15. For Ubuntu 20.04 and 22.04 you can grab pre-built LLVM libraries from [LLVM's apt repositories](https://apt.llvm.org/). General instructions like so:
 ```bash
 wget https://apt.llvm.org/llvm.sh
 chmod +x llvm.sh
 sudo ./llvm.sh 15
 sudo apt install libclang-15-dev # not installed by default
 ```
+On Ubuntu 24.04, you can install them directly from Ubuntu's repos instead:
+```bash
+sudo apt install clang-15 llvm-15 libclang-15-dev lld-15
+```
 
 Then, run `cmake` from a build directory to build N00B.
 ```bash
 mkdir build
 cd build
-cmake ../ -DCMAKE_CXX_COMPILER=clang++-15 -DCMAKE_C_COMPILER=clang-15 -DLLVM_DIR=/usr/lib/llvm-15/lib/cmake/ -DClang_DIR=/usr/lib/llvm-15/lib/cmake/clang/
-mv compile_commands.json ../ # optionally expose the compilation database to help an IDE/language server
+cmake ../ # Optional: -DLLVM_DIR=/usr/lib/llvm-15/lib/cmake/ -DClang_DIR=/usr/lib/llvm-15/lib/cmake/clang/
 make -j
 ```
 If you manually installed LLVM to a non-standard location, you can set the `LLVM_DIR` CMake variable to the `cmake/llvm` folder of your installation (containing `LLVMConfig.cmake`, `find <folder> -name "LLVMConfig.cmake"`). Same for `Clang_DIR`. 
