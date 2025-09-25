@@ -1,10 +1,13 @@
 cmake_minimum_required(VERSION 3.5) # this can probably be relaxed tbh
-project(NOOB)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_C_COMPILER clang-15)
+set(CMAKE_CXX_COMPILER clang++-15)
+
+project(NOOB)
 
 # include NOOB configuration variables
 include("${CMAKE_SOURCE_DIR}/noobconfig.cmake")
