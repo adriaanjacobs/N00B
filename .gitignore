@@ -26,5 +26,7 @@
 
 !results/
 
+!scripts/
+
 !test/
 !test/**/
