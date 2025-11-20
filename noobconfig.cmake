@@ -1,15 +1,8 @@
 # N00B config file. Defaults are set for reproducible performance evaluation, across both x86 and ARM
 
 # encode platform differences here
-if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
-    set(TAG_WIDTH               7)
-    # minimum 16B allocations
-    set(NOOB_MIN_RADIX          0x4)
-    # maximum 16GB allocations
-    set(NON_NOOB_MIN_RADIX      35)
-    set(NOOB_IGNORE_ERRORS      1)
-    set(NOOB_TAG_POINTERS       0)
-elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
+    message(STATUS "Host: AArch64 (ARM)")
     set(TAG_WIDTH               8)
     # no minimum allocation size
     #   the implementation may enforce additional minima for performance/simplicity
@@ -21,9 +14,34 @@ elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
     set(NON_NOOB_MIN_RADIX      48)
     set(NOOB_IGNORE_ERRORS      0)
     set(NOOB_TAG_POINTERS       1)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)")
+    # figure out if this is Intel or AMD
+    file(READ "/proc/cpuinfo" CPUINFO_RAW)
+    if(CPUINFO_RAW MATCHES "vendor_id\t: GenuineIntel")
+        message(STATUS "Host: Intel x86_64 (Detected GenuineIntel)")
+        set(TAG_WIDTH               7)
+        # minimum 16B allocations
+        set(NOOB_MIN_RADIX          0x4)
+        # maximum 16GB allocations
+        set(NON_NOOB_MIN_RADIX      35)
+        set(NOOB_IGNORE_ERRORS      0)
+        set(NOOB_TAG_POINTERS       1)
+    elseif(CPUINFO_RAW MATCHES "vendor_id\t: AuthenticAMD")
+        message(STATUS "Host: AMD x86_64 (Detected AuthenticAMD)")
+        set(TAG_WIDTH               7)
+        # minimum 16B allocations
+        set(NOOB_MIN_RADIX          0x4)
+        # maximum 16GB allocations
+        set(NON_NOOB_MIN_RADIX      35)
+        set(NOOB_IGNORE_ERRORS      1)
+        set(NOOB_TAG_POINTERS       0)
+    else()
+        message(FATAL_ERROR "Host: x86_64, but Vendor ID is unknown: ${HOST_PROC}")
+    endif()
 else()
-    message(FATAL_ERROR "Unsupported architecture: ${CMAKE_SYSTEM_PROCESSOR}")
+    message(FATAL_ERROR "Unsupported processor: ${CMAKE_SYSTEM_PROCESSOR}")
 endif()
+
 set(ARITH_LEEWAY_WIDTH          0)
 set(ARITH_LEEWAY_OCCUPIED_BITS  0b00)
 set(NOOB_STACK_SIZE             0x400000ULL) # bzip2 needs large objects on the stack!

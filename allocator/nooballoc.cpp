@@ -344,11 +344,37 @@ struct NOOBAllocator {
         if (noob_initialize_noobstacks) // the function exists. we are linked into a hardened NOOB program
             noob_initialize_noobstacks();
 
+#if NOOB_TAG_POINTERS
 #if __aarch64__
         // start by enabling the tagged address ABI
-        if (prctl(PR_SET_TAGGED_ADDR_CTRL, PR_TAGGED_ADDR_ENABLE, 0, 0, 0, 0) == -1)
+        if (prctl(PR_SET_TAGGED_ADDR_CTRL, PR_TAGGED_ADDR_ENABLE, 0, 0, 0, 0) == -1) {
             perror("enable tagged address kernel abi");
-#endif // on x86-64, there is no kernel interface yet
+            assert(!"AArch64 platform does not support TBI!")
+        }
+#elif __x86_64__
+        { // assuming a LAM platform here. UAI is not supported by the kernel yet. 
+            uint64_t max_tag_bits;
+            if (syscall(SYS_arch_prctl, ARCH_GET_MAX_TAG_BITS, &max_tag_bits)) {
+                perror("ARCH_GET_MAX_TAG_BITS");
+                assert(!"Kernel does not support LAM!\n");
+            }
+
+            assert(max_tag_bits == LAM_U48_BITS && "Please enable LAM U48 support on this kernel.");
+
+            if (syscall(SYS_arch_prctl, ARCH_ENABLE_TAGGED_ADDR, LAM_U48_BITS)) {
+                perror("ARCH_ENABLE_TAGGED_ADDR");
+                assert(!"Kernel does not support LAM!\n");
+            }
+
+            uint64_t untag_mask = 0;
+            if (syscall(SYS_arch_prctl, ARCH_GET_UNTAG_MASK, &untag_mask)) {
+                perror("ARCH_GET_UNTAG_MASK");
+                assert(!"Weird: kernel supports enough bits but mask is different than expected");
+            }
+            assert(untag_mask == ~LAM_U48_MASK && "Kernel LAM U48 mask is different than expected?");
+        }
+#endif
+#endif
 
         // The non-NOOB memory region is mapped at address 2^NON_NOOB_MIN_RADIX -> VA_MAX. Instrumentation ignores these pointers as follows:
         //  the dereferences checks:

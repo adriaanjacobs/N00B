@@ -10,7 +10,7 @@ set(CMAKE_CXX_COMPILER clang++-15)
 project(NOOB)
 
 # include NOOB configuration variables
-include("${CMAKE_SOURCE_DIR}/noobconfig.cmake")
+include(noobconfig.cmake)
 
 # generate config.h include file
 configure_file(
