@@ -1,6 +1,8 @@
 #pragma once
 
 #define TAG_WIDTH                   (${TAG_WIDTH})
+#define NOOB_TOPTAG_START           (${NOOB_TOPTAG_START})
+static_assert(NOOB_TOPTAG_START + TAG_WIDTH <= 64);
 #define NOOB_MIN_RADIX              (${NOOB_MIN_RADIX})
 #define NON_NOOB_MIN_RADIX          (${NON_NOOB_MIN_RADIX})
 #define NOOB_IGNORE_ERRORS          (${NOOB_IGNORE_ERRORS})

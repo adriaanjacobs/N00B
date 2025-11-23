@@ -284,16 +284,19 @@ llvm::Value* NOOBInstrumentationPass::shiftDownTillInPointerTag(llvm::Value* ptr
     return llvm::BinaryOperator::CreateLShr(ptrAsInt, radix, "iptag", insertBefore);
 }
 
-llvm::Value* NOOBInstrumentationPass::computeInPointerTagMask(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore) {
+llvm::Value* NOOBInstrumentationPass::embedInPointerTagAsTopTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore) {
     auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
-    auto inPointerTag = shiftDownTillInPointerTag(ptr, radix, insertBefore);
-    return llvm::BinaryOperator::CreateShl(inPointerTag, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH}), "", insertBefore);
+    auto ptrAsInt = castToInt64Ty(ptr, insertBefore);
+    auto inPointerTag = shiftDownTillInPointerTag(ptrAsInt, radix, insertBefore);
+    auto inPointerTagMask = llvm::BinaryOperator::CreateShl(inPointerTag, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, NOOB_TOPTAG_START}), "", insertBefore);
+    // assuming that offsetStackPtr's top tag is 0 here (which it should be)
+    return llvm::BinaryOperator::CreateOr(ptrAsInt, inPointerTagMask, "", insertBefore);
 }
 
 llvm::Value* NOOBInstrumentationPass::computeTopTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore) {
     auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
     auto ptrAsInt = createBitOrPointerCastIfNecessary(ptr, int64Ty, "", insertBefore);
-    return llvm::BinaryOperator::CreateLShr(ptrAsInt, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH}), "toptag", insertBefore);
+    return llvm::BinaryOperator::CreateLShr(ptrAsInt, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, NOOB_TOPTAG_START}), "toptag", insertBefore);
 }
 
 llvm::Value* NOOBInstrumentationPass::computePoisonMaskAtDerefSite(const CheckInfo& checkInfo, const BasePtrInfo& basePtrInfo, llvm::Instruction* insertBefore) {
@@ -345,7 +348,7 @@ llvm::Value* NOOBInstrumentationPass::computePoisonMaskAtDerefSite(const CheckIn
         // place the resulting value |top bits|_here_|radix|rest of pointer ...|
         //  it's not a problem that the more significant bits of the `poisonMask` value likely aren't 0 here, they will get ignored by TBI/UAI anyway
         //  this would only be a problem for range checks, where the pointer value could escape, but we zero out the top bits of isNotInBounds for that reason
-        auto poisonMask = llvm::BinaryOperator::CreateShl(isNotInBounds, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, 64 - TAG_WIDTH - TAG_WIDTH}), "", insertBefore);
+        auto poisonMask = llvm::BinaryOperator::CreateShl(isNotInBounds, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, NOOB_TOPTAG_START - TAG_WIDTH}), "", insertBefore);
 #endif
         return poisonMask;
     }
@@ -508,6 +511,9 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
                 // check if the poisonMask is 0
                 auto trapIfNotZero = llvm::CallInst::Create(noob_assert_zero_fn, {poisonMask}, "", insertBefore);
             } else {
+#if __x86_64__
+                assert(!"LAM U48 platforms cannot support pointer poisoning for now");
+#endif
                 // poison the pointerOperand
                 auto ptrAsInt = castToInt64Ty(checkInfo->pointerOperand, insertBefore); // reset the ptrAsInt because isRangeCheck clause mightve changed pointerOperand
                 llvm::Instruction* poisonedPtr = llvm::BinaryOperator::CreateOr(ptrAsInt, poisonMask, "", insertBefore);
@@ -637,9 +643,7 @@ void NOOBInstrumentationPass::moveUnsafeAllocasToNOOBStacks(llvm::Module& module
                 // now put the in-pointer tag in the top tag to make the pointer fully NOOB-compliant
                 offsetStackPtr = castToInt64Ty(offsetStackPtr, alloca);
                 auto radixVal = llvm::ConstantInt::get(int64Ty, {64, radix});
-                auto inPointerTagMask = computeInPointerTagMask(offsetStackPtr, radixVal, alloca);
-                // assuming that offsetStackPtr's top tag is 0 here (which it should be)
-                offsetStackPtr = llvm::BinaryOperator::CreateOr(offsetStackPtr, inPointerTagMask, "", alloca);
+                offsetStackPtr = embedInPointerTagAsTopTag(offsetStackPtr, radixVal, alloca);
 #endif
 
                 auto castedPtr = llvm::CastInst::CreateBitOrPointerCast(offsetStackPtr, alloca->getType(), alloca->getName(), alloca);

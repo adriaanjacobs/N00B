@@ -39,7 +39,7 @@ inline uint8_t extract_inpointertag(uintptr_t ptr) {
 }
 
 inline uint8_t extract_toptag(uintptr_t ptr) {
-    return ptr >> (64 - TAG_WIDTH);
+    return ptr >> NOOB_TOPTAG_START;
 }
 
 inline size_t extract_offset(uintptr_t ptr) {

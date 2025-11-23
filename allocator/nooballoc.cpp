@@ -13,6 +13,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/prctl.h>
+#include <asm/prctl.h>
+#include <sys/syscall.h>
 
 #include <vector>
 #include <bit>
@@ -33,6 +35,14 @@
         }                                                                                       \
     } while (false)
 
+#define LAM_NONE                0
+
+#define LAM_U57_BITS            6
+#define LAM_U57_MASK            (0x3fULL << 57)
+
+#define LAM_U48_BITS            15
+#define LAM_U48_MASK            (0x7fffULL << 48)
+
 struct run_on_destruct {
     std::function<void()> func;
     run_on_destruct(auto func) : func{std::move(func)} {}
@@ -44,8 +54,8 @@ struct run_on_destruct {
 #define UNIQUE_VAR_NAME CONCAT(_unique_var_, __COUNTER__)
 #define defer(block) run_on_destruct UNIQUE_VAR_NAME{[&] () -> void { block; }}
 
-#define NUM_BLOCKS_IN_ARENA         (1U << TAG_WIDTH)
-#define TAG_T_MAX                   (NUM_BLOCKS_IN_ARENA - 1UL)
+#define NOOB_OBJS_PER_ARENA         (1U << TAG_WIDTH)
+#define TAG_T_MAX                   (NOOB_OBJS_PER_ARENA - 1UL)
 
 bool noob_is_nonnoob(uintptr_t ptr) {
     return extract_radix(ptr) >= NON_NOOB_MIN_RADIX;
@@ -76,7 +86,7 @@ size_t arena_idx_in_size_region(uintptr_t ptr) {
 
 inline size_t arena_base(uintptr_t ptr) {
     auto radix = extract_radix(ptr);
-    ptr &= (~0ULL >> TAG_WIDTH); // clear the top bits
+    ptr &= (~0ULL >> (64 - NOOB_TOPTAG_START)); // clear the top bits
     ptr &= ~static_cast<uint64_t>(TAG_T_MAX) << radix; // clear the iptag & offset
     return ptr;
 }
@@ -119,10 +129,10 @@ static void* mmap_arena_aritharea(uint8_t in_pointer_radix, size_t aritharea_siz
 }
 
 struct NOOBArena {
-    std::bitset<NUM_BLOCKS_IN_ARENA> free_status;
+    std::bitset<NOOB_OBJS_PER_ARENA> free_status;
     // fresh blocks have never been allocated before
     //  they are, by definition, free
-    std::bitset<NUM_BLOCKS_IN_ARENA> fresh_status;
+    std::bitset<NOOB_OBJS_PER_ARENA> fresh_status;
     void* aritharea_base;
     void* occupied_base;
     const uint8_t radix;
@@ -185,7 +195,7 @@ struct NOOBArena {
         // embed the lowestMSBs in the top bits now
         auto iptag = extract_inpointertag(ptr);
         assert(iptag <= TAG_T_MAX);
-        auto topmask = static_cast<uint64_t>(iptag) << (64 - TAG_WIDTH);
+        auto topmask = static_cast<uint64_t>(iptag) << NOOB_TOPTAG_START;
         ptr |= topmask;
 #endif
         return (void*) ptr;
@@ -352,6 +362,7 @@ struct NOOBAllocator {
             assert(!"AArch64 platform does not support TBI!")
         }
 #elif __x86_64__
+        static_assert(USE_BRANCHING_CHECKS, "U48 does not work with poisoning!");
         { // assuming a LAM platform here. UAI is not supported by the kernel yet. 
             uint64_t max_tag_bits;
             if (syscall(SYS_arch_prctl, ARCH_GET_MAX_TAG_BITS, &max_tag_bits)) {
@@ -503,7 +514,7 @@ static uintptr_t noob_embed_inpointer_tag(uintptr_t ptr, uint8_t top_tag) {
 
     ptr >>= radix;
     ptr &= ~static_cast<uint64_t>(TAG_T_MAX);
-    assert(top_tag <= NUM_BLOCKS_IN_ARENA - 1);
+    assert(top_tag <= NOOB_OBJS_PER_ARENA - 1);
     ptr |= top_tag;
     ptr <<= radix;
     ptr |= offset;

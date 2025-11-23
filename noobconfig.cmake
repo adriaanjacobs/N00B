@@ -4,6 +4,7 @@
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
     message(STATUS "Host: AArch64 (ARM)")
     set(TAG_WIDTH               8)
+    set(NOOB_TOPTAG_START       56) # amount to shift down by to obtain the toptag. N00B assumes that all bits above the toptag are 0
     # no minimum allocation size
     #   the implementation may enforce additional minima for performance/simplicity
     #   but this setting guarantees that the actual radix will be encoded natively in the pointer
@@ -19,7 +20,8 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)")
     file(READ "/proc/cpuinfo" CPUINFO_RAW)
     if(CPUINFO_RAW MATCHES "vendor_id\t: GenuineIntel")
         message(STATUS "Host: Intel x86_64 (Detected GenuineIntel)")
-        set(TAG_WIDTH               7)
+        set(TAG_WIDTH               8)
+        set(NOOB_TOPTAG_START       55)
         # minimum 16B allocations
         set(NOOB_MIN_RADIX          0x4)
         # maximum 16GB allocations
@@ -29,6 +31,7 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)")
     elseif(CPUINFO_RAW MATCHES "vendor_id\t: AuthenticAMD")
         message(STATUS "Host: AMD x86_64 (Detected AuthenticAMD)")
         set(TAG_WIDTH               7)
+        set(NOOB_TOPTAG_START       56)
         # minimum 16B allocations
         set(NOOB_MIN_RADIX          0x4)
         # maximum 16GB allocations

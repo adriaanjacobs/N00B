@@ -9,7 +9,7 @@ extern bool hooked;
 
 template<typename T>
 T* noob_striptop(T* ptr) {
-    return (T*) ((uintptr_t) ptr & (~0ULL >> TAG_WIDTH)); 
+    return (T*) ((uintptr_t) ptr & (~0ULL >> (64 - NOOB_TOPTAG_START))); 
 }
 
 void noob_non_allocating_printf(const char* fmt, ...);
