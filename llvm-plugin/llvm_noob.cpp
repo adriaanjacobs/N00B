@@ -511,8 +511,15 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
                 // check if the poisonMask is 0
                 auto trapIfNotZero = llvm::CallInst::Create(noob_assert_zero_fn, {poisonMask}, "", insertBefore);
             } else {
-#if __x86_64__
-                assert(!"LAM U48 platforms cannot support pointer poisoning for now");
+#if __x86_64__ // LAMU48 platforms have only limited canonical bits: 63 and 47. Compute a one-bit mask poison mask for the 47th bit
+                auto maskIsZero = new llvm::ICmpInst(insertBefore, llvm::ICmpInst::ICMP_EQ, poisonMask, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, 0}));
+                poisonMask = llvm::SelectInst::Create(
+                    maskIsZero, 
+                    llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, 0}), // if zero
+                    llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, 1UL << (NOOB_TOPTAG_START - TAG_WIDTH)}), // if non zero
+                    "",
+                    insertBefore
+                );
 #endif
                 // poison the pointerOperand
                 auto ptrAsInt = castToInt64Ty(checkInfo->pointerOperand, insertBefore); // reset the ptrAsInt because isRangeCheck clause mightve changed pointerOperand

@@ -362,7 +362,6 @@ struct NOOBAllocator {
             assert(!"AArch64 platform does not support TBI!")
         }
 #elif __x86_64__
-        static_assert(USE_BRANCHING_CHECKS, "U48 does not work with poisoning!");
         { // assuming a LAM platform here. UAI is not supported by the kernel yet. 
             uint64_t max_tag_bits;
             if (syscall(SYS_arch_prctl, ARCH_GET_MAX_TAG_BITS, &max_tag_bits)) {
@@ -384,6 +383,8 @@ struct NOOBAllocator {
             }
             assert(untag_mask == ~LAM_U48_MASK && "Kernel LAM U48 mask is different than expected?");
         }
+#else
+#error Unsupported platform
 #endif
 #endif
 
