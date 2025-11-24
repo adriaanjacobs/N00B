@@ -13,7 +13,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/prctl.h>
-#include <asm/prctl.h>
+#ifdef __x86_64__
+#include <asm/prctl.h>  // for arch_prctl definitions
+#endif
 #include <sys/syscall.h>
 
 #include <vector>
@@ -359,7 +361,7 @@ struct NOOBAllocator {
         // start by enabling the tagged address ABI
         if (prctl(PR_SET_TAGGED_ADDR_CTRL, PR_TAGGED_ADDR_ENABLE, 0, 0, 0, 0) == -1) {
             perror("enable tagged address kernel abi");
-            assert(!"AArch64 platform does not support TBI!")
+            assert(!"AArch64 platform does not support TBI!");
         }
 #elif __x86_64__
         { // assuming a LAM platform here. UAI is not supported by the kernel yet. 
