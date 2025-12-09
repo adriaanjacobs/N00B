@@ -511,19 +511,33 @@ size_t noob_usable_size(void* ptr) {
     return 1ULL << radix;
 }
 
-static uintptr_t noob_embed_inpointer_tag(uintptr_t ptr, uint8_t top_tag) {
+static uintptr_t noob_embed_inpointer_tag(uintptr_t ptr, uint8_t tag) {
     auto radix = extract_radix(ptr);
     auto offset = ptr & ((1ULL << radix) - 1);
 
     ptr >>= radix;
     ptr &= ~static_cast<uint64_t>(TAG_T_MAX);
-    assert(top_tag <= NOOB_OBJS_PER_ARENA - 1);
-    ptr |= top_tag;
+    assert(tag <= NOOB_OBJS_PER_ARENA - 1);
+    ptr |= tag;
     ptr <<= radix;
     ptr |= offset;
 
     return ptr;
 }
+
+#if TRACK_ARITH_STATS
+static uint64_t cnt_in_bounds_arithmetic = 0;
+static std::map<int64_t, uint64_t> cnt_out_of_bounds_arithmetic;
+
+[[gnu::destructor]]
+void print_stats() {
+    fprintf(stderr, "OOB stats: <oob offset> <occurence>\n");
+    fprintf(stderr, "0\t\t%lu\n", cnt_in_bounds_arithmetic);
+    for (auto& [offset, cnt] : cnt_out_of_bounds_arithmetic) {
+        fprintf(stderr, "%ld\t\t%lu\n", offset, cnt);
+    }
+}
+#endif
 
 static void check_ptr_arithmetic(void* ptr, void* base) {
     auto baseint = (uintptr_t) base;
@@ -563,19 +577,43 @@ void noob_allocate_stacks(void** stack_array, uint8_t lowest_radix, uint8_t high
     }
 }
 
+void record_oob_status(uintptr_t obj_addr, size_t obj_size, void* ptr) {
+    auto offset = (intptr_t) ptr - obj_addr;
+    if (offset >= 0 && (uint64_t) offset < obj_size) {
+        cnt_in_bounds_arithmetic++;
+    } else { // oob
+        if (offset < 0)
+            cnt_out_of_bounds_arithmetic[offset]++;
+        else
+            cnt_out_of_bounds_arithmetic[offset - obj_size]++;
+    }
+}
+
 void noob_access_check(void* ptr, void* base, bool checkDeref, bool checkArith) {
     // fprintf(stderr, "noob_access_check(%p, %p)\n", ptr, base);
     if (checkArith)
         check_ptr_arithmetic(ptr, base);
-
-    if (!checkDeref)
-        return;
-
+    
     auto radix = extract_radix((uintptr_t) base);
     auto embedded_tag = extract_inpointertag((uintptr_t) ptr);
     auto top_tag = extract_toptag((uintptr_t) ptr);
 
     if (radix >= NON_NOOB_MIN_RADIX) // ignore uninstrumented pointers
+        return;
+
+#if TRACK_ARITH_STATS   // record OOB status for non-dereferenced arithmetic
+    intptr_t origobj = noob_embed_inpointer_tag((uintptr_t) base, embedded_tag);
+    origobj &= ~((1ULL << radix) - 1);  // remove offset -> ptr to start of object
+    assert(origobj % (1UL << radix) == 0);
+    if (checkDeref) // dereferenced pointer, check if the base is coming from OOB
+        record_oob_status(origobj, 1UL << radix, base);
+    else if (checkArith) {  // non-dereferenced escape site, check if the escaping pointer is OOB
+        record_oob_status(origobj, 1UL << radix, base);
+        record_oob_status(origobj, 1UL << radix, ptr);
+    }
+#endif
+
+    if (!checkDeref) 
         return;
     
     if (embedded_tag != top_tag) {

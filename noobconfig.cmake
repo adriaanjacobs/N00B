@@ -59,6 +59,7 @@ set(REPLACE_STACK_ALLOCS        1)
 set(REMAP_GLOBALS               0)
 
 set(EMIT_RUNTIME_CALLS          0)
+set(TRACK_ARITH_STATS           0)
 
 set(EMULATE_LOWFAT              0)
 set(PAD_BY_ONE_BYTE             0)
