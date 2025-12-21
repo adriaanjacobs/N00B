@@ -9,7 +9,7 @@ target_compile_options(nooballoc PUBLIC
 target_compile_options(nooballoc PRIVATE -fno-rtti -fno-exceptions)
 target_compile_options(nooballoc PRIVATE -flto)
 if(EMIT_RUNTIME_CALLS)
-    target_compile_options(nooballoc PRIVATE -O1)
+    target_compile_options(nooballoc PRIVATE -O1 -fno-omit-frame-pointer)
 endif()
 target_link_options(nooballoc PRIVATE -flto -fuse-ld=lld-15)
 target_link_libraries(nooballoc "-ldl")
