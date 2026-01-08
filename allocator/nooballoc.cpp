@@ -528,17 +528,26 @@ static uintptr_t noob_embed_inpointer_tag(uintptr_t ptr, uint8_t tag) {
 #if TRACK_ARITH_STATS
 static uint64_t cnt_in_bounds_arithmetic = 0;
 static std::map<int64_t, uint64_t> cnt_out_of_bounds_arithmetic;
-static uint64_t cnt_noob_checks = 0;
-static uint64_t cnt_noob_managed_ptrs = 0;
 
 [[gnu::destructor]]
 void print_stats() {
-    fprintf(stderr, "Total N00B checks: %ld\n", cnt_noob_checks);
-    fprintf(stderr, "Total N00B-managed checks: %ld\n", cnt_noob_managed_ptrs);
     fprintf(stderr, "OOB stats: <oob offset> <occurence>\n");
     fprintf(stderr, "0\t\t%lu\n", cnt_in_bounds_arithmetic);
     for (auto& [offset, cnt] : cnt_out_of_bounds_arithmetic) {
         fprintf(stderr, "%ld\t\t%lu\n", offset, cnt);
+    }
+}
+
+void record_oob_status(intptr_t obj_addr, size_t obj_size, void* ptr) {
+    auto offset = (intptr_t) ptr - obj_addr;
+    if (offset >= 0 && (uint64_t) offset < obj_size) {
+        cnt_in_bounds_arithmetic++;
+    } else { // oob
+        assert(offset != 0);
+        if (offset < 0)
+            cnt_out_of_bounds_arithmetic[offset]++;
+        else
+            cnt_out_of_bounds_arithmetic[offset - (obj_size - 1)]++;
     }
 }
 #endif
@@ -581,19 +590,6 @@ void noob_allocate_stacks(void** stack_array, uint8_t lowest_radix, uint8_t high
     }
 }
 
-void record_oob_status(intptr_t obj_addr, size_t obj_size, void* ptr) {
-    auto offset = (intptr_t) ptr - obj_addr;
-    if (offset >= 0 && (uint64_t) offset < obj_size) {
-        cnt_in_bounds_arithmetic++;
-    } else { // oob
-        assert(offset != 0);
-        if (offset < 0)
-            cnt_out_of_bounds_arithmetic[offset]++;
-        else
-            cnt_out_of_bounds_arithmetic[offset - (obj_size - 1)]++;
-    }
-}
-
 void noob_access_check(void* ptr, void* base, bool checkDeref, bool checkArith) {
     // fprintf(stderr, "noob_access_check(%p, %p)\n", ptr, base);
     if (checkArith)
@@ -603,12 +599,8 @@ void noob_access_check(void* ptr, void* base, bool checkDeref, bool checkArith) 
     auto embedded_tag = extract_inpointertag((uintptr_t) ptr);
     auto top_tag = extract_toptag((uintptr_t) ptr);
 
-    cnt_noob_checks++;
-
     if (radix >= NON_NOOB_MIN_RADIX) // ignore uninstrumented pointers
         return;
-
-    cnt_noob_managed_ptrs++;
 
 #if TRACK_ARITH_STATS   // record OOB status for non-dereferenced arithmetic
     intptr_t origobj = noob_embed_inpointer_tag((uintptr_t) base, embedded_tag);
