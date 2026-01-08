@@ -187,15 +187,26 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
 
     auto& isInBoundsAnalysis = MAM.getResult<IsInBoundsAnalysis>(module);
     // add escape sites too, only for unsafe pointers
+
+#if SOUND_POINTER_DETECTION
     for (auto& pointer : pointerInfo.pointers) {
         ASSERT_ELSE_UNKOWN(pointerInfo.is_confirmed_pointer(pointer), pointer);
+#else
+    for (auto& func : module)
+        for (auto& inst : llvm::instructions(func))
+            if (auto pointer = llvm::dyn_cast<llvm::GetElementPtrInst>(&inst)) {
+#endif
         // do not wrap escaping constant pointers (obviously) or pointers that are in bounds
-        if (llvm::isa<llvm::Constant>(pointer) || isInBoundsAnalysis.isInBounds(pointer))
+        if (llvm::isa<llvm::Constant>(pointer))
             continue;
 
         llvm::DenseSet<llvm::Use*> escapeSites;
         collectIntraProceduralPtrEscapes(pointer, escapeSites, pointerInfo);
         for (auto* use : escapeSites) {
+            // if the escaping pointer is in bounds, nothing to do
+            if (isInBoundsAnalysis.isInBounds(use->get()))
+                continue;
+            
             auto user = use->getUser();
             // the user is always an instruction here!! (otherwise we're doing an unsafe but constant escape??)
             auto userInst = llvm::dyn_cast<llvm::Instruction>(user);
