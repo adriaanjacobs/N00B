@@ -12,6 +12,8 @@ project(NOOB)
 # include NOOB configuration variables
 include(noobconfig.cmake)
 
+add_subdirectory(n00bloader)
+
 # generate config.h include file
 configure_file(
     ${CMAKE_SOURCE_DIR}/config.h.in
