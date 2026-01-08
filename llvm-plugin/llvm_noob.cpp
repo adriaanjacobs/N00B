@@ -292,7 +292,8 @@ llvm::Value* NOOBInstrumentationPass::computeSafeInArithAreaPtr(llvm::Value* ptr
 llvm::Value* NOOBInstrumentationPass::shiftDownTillInPointerTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore) {
     auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
     auto ptrAsInt = createBitOrPointerCastIfNecessary(ptr, int64Ty, "", insertBefore);
-    return llvm::BinaryOperator::CreateLShr(ptrAsInt, radix, "iptag", insertBefore);
+    auto ipTag = llvm::BinaryOperator::CreateLShr(ptrAsInt, radix, "iptag", insertBefore);
+    return llvm::BinaryOperator::CreateAnd(ipTag, llvm::Constant::getIntegerValue(int64Ty, llvm::APInt{64, (1UL << TAG_WIDTH) - 1}), "iptag", insertBefore);
 }
 
 llvm::Value* NOOBInstrumentationPass::embedInPointerTagAsTopTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore) {
