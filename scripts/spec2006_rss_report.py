@@ -59,9 +59,28 @@ def parse_oob_stats(run_dir: Path):
             try:
                 # Read file content (ignoring errors for binary files)
                 content = f.read_text(errors="ignore")
-                if header in content:
-                    stats = {}
+                
+                # Check for either specific header or the stats lines
+                if header in content or "Total N00B checks:" in content:
+                    result = {
+                        "histogram": {},
+                        "total_checks": None,
+                        "managed_checks": None
+                    }
                     lines = content.splitlines()
+
+                    # First pass: look for single line stats
+                    for line in lines:
+                        if "Total N00B checks:" in line:
+                            try:
+                                result["total_checks"] = int(line.split(":", 1)[1].strip())
+                            except ValueError: pass
+                        elif "Total N00B-managed checks:" in line:
+                            try:
+                                result["managed_checks"] = int(line.split(":", 1)[1].strip())
+                            except ValueError: pass
+
+                    # Second pass: look for histogram block
                     found_header = False
                     for line in lines:
                         if header in line:
@@ -72,19 +91,17 @@ def parse_oob_stats(run_dir: Path):
                             parts = line.split()
                             if len(parts) < 2:
                                 # Stop if line doesn't look like "offset count"
-                                # But allow empty lines to just skip? 
-                                # The C code loop prints tightly, so break on mismatch is safer
-                                # to avoid reading garbage.
                                 if not line.strip(): continue
                                 break
                             try:
                                 offset = int(parts[0])
                                 count = int(parts[1])
-                                stats[offset] = count
+                                result["histogram"][offset] = count
                             except ValueError:
                                 break
-                    if stats:
-                        return stats
+                    
+                    if result["histogram"] or result["total_checks"] is not None:
+                        return result
             except Exception:
                 continue
     except Exception:
@@ -207,14 +224,23 @@ def main():
                 print(f"{b:<20} {'':<45} No stats found")
             else:
                 print(f"{b:<20} {r['rundir']:<45}")
-                stats = r["value"]
-                # Print 0 (in-bounds) first
-                if 0 in stats:
-                    print(f"    In-bounds (0): {stats[0]}")
-                # Print others sorted
-                for offset in sorted(stats.keys()):
-                    if offset != 0:
-                        print(f"    Offset {offset:<10}: {stats[offset]}")
+                data = r["value"]
+                
+                # Print global counters if present
+                if data.get("total_checks") is not None:
+                    print(f"    Total Checks:   {data['total_checks']}")
+                if data.get("managed_checks") is not None:
+                    print(f"    Managed Checks: {data['managed_checks']}")
+                
+                stats = data.get("histogram", {})
+                if stats:
+                    # Print 0 (in-bounds) first
+                    if 0 in stats:
+                        print(f"    In-bounds (0): {stats[0]}")
+                    # Print others sorted
+                    for offset in sorted(stats.keys()):
+                        if offset != 0:
+                            print(f"    Offset {offset:<10}: {stats[offset]}")
                 print("")
     else:
         colname = "CodeSize(KB)" if args.code_size else "RSS(KB)"
