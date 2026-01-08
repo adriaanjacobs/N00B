@@ -47,6 +47,50 @@ def parse_rss(time_log: Path):
         return None
     return None
 
+def parse_oob_stats(run_dir: Path):
+    """Search for OOB stats in files within run_dir."""
+    header = "OOB stats: <oob offset> <occurence>"
+    try:
+        # Check files, prioritizing newest
+        files = [f for f in run_dir.iterdir() if f.is_file()]
+        files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+        
+        for f in files:
+            try:
+                # Read file content (ignoring errors for binary files)
+                content = f.read_text(errors="ignore")
+                if header in content:
+                    stats = {}
+                    lines = content.splitlines()
+                    found_header = False
+                    for line in lines:
+                        if header in line:
+                            found_header = True
+                            continue
+                        
+                        if found_header:
+                            parts = line.split()
+                            if len(parts) < 2:
+                                # Stop if line doesn't look like "offset count"
+                                # But allow empty lines to just skip? 
+                                # The C code loop prints tightly, so break on mismatch is safer
+                                # to avoid reading garbage.
+                                if not line.strip(): continue
+                                break
+                            try:
+                                offset = int(parts[0])
+                                count = int(parts[1])
+                                stats[offset] = count
+                            except ValueError:
+                                break
+                    if stats:
+                        return stats
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
+
 def parse_text_size(exe_path: Path):
     try:
         out = subprocess.check_output(["size", "-B", str(exe_path)], text=True)
@@ -85,7 +129,7 @@ def newest_executable_among_runs(run_dirs, bench_short, code_size_glob):
             continue
     return newest_exe, newest_dir
 
-def collect_data(code_size_glob=None):
+def collect_data(code_size_glob=None, oob_stats=False):
     results = {}
     for bench in BENCH_ORDER:
         bench_dir = BENCHSPEC_DIR / bench
@@ -103,6 +147,9 @@ def collect_data(code_size_glob=None):
             results[bench] = None
             continue
 
+        chosen_run = None
+        exe_path = None
+
         if code_size_glob:
             matches = [d for d in run_subdirs if code_size_glob in d.name]
             if not matches:
@@ -112,18 +159,24 @@ def collect_data(code_size_glob=None):
             # Pick shorthand (special case or normal)
             bench_short = SPECIAL_SHORTHANDS.get(bench, bench.split(".", 1)[1])
             exe_path, chosen_run = newest_executable_among_runs(matches, bench_short, code_size_glob)
-            if exe_path is None:
-                results[bench] = None
-                continue
-            value_kb = parse_text_size(exe_path)
         else:
             latest_run = max(run_subdirs, key=lambda d: d.stat().st_mtime)
-            time_log = latest_run / "time.log"
-            value_kb = parse_rss(time_log)
             chosen_run = latest_run
 
+        if not chosen_run:
+            results[bench] = None
+            continue
+
+        if oob_stats:
+            value = parse_oob_stats(chosen_run)
+        elif code_size_glob:
+            value = parse_text_size(exe_path) if exe_path else None
+        else:
+            time_log = chosen_run / "time.log"
+            value = parse_rss(time_log)
+
         results[bench] = {
-            "value": value_kb,
+            "value": value,
             "rundir": chosen_run.name if chosen_run else "",
         }
     return results
@@ -137,17 +190,41 @@ def main():
              "Argument must match the suffix of executables/run dirs "
              "(e.g., .clang15-lto-baseline)."
     )
+    ap.add_argument(
+        "--oob-stats",
+        action="store_true",
+        help="Report OOB stats from stderr instead of RSS."
+    )
     args = ap.parse_args()
 
-    results = collect_data(code_size_glob=args.code_size)
-    colname = "CodeSize(KB)" if args.code_size else "RSS(KB)"
-    print(f"{'Benchmark':<20} {'RunDir':<45} {colname}")
-    for b in BENCH_ORDER:
-        r = results.get(b)
-        if not r or r["value"] is None:
-            print(f"{b:<20} {'':<45} ")
-        else:
-            print(f"{b:<20} {r['rundir']:<45} {r['value']:.2f}")
+    results = collect_data(code_size_glob=args.code_size, oob_stats=args.oob_stats)
+    
+    if args.oob_stats:
+        print(f"{'Benchmark':<20} {'RunDir':<45} {'OOB Stats'}")
+        for b in BENCH_ORDER:
+            r = results.get(b)
+            if not r or r["value"] is None:
+                print(f"{b:<20} {'':<45} No stats found")
+            else:
+                print(f"{b:<20} {r['rundir']:<45}")
+                stats = r["value"]
+                # Print 0 (in-bounds) first
+                if 0 in stats:
+                    print(f"    In-bounds (0): {stats[0]}")
+                # Print others sorted
+                for offset in sorted(stats.keys()):
+                    if offset != 0:
+                        print(f"    Offset {offset:<10}: {stats[offset]}")
+                print("")
+    else:
+        colname = "CodeSize(KB)" if args.code_size else "RSS(KB)"
+        print(f"{'Benchmark':<20} {'RunDir':<45} {colname}")
+        for b in BENCH_ORDER:
+            r = results.get(b)
+            if not r or r["value"] is None:
+                print(f"{b:<20} {'':<45} ")
+            else:
+                print(f"{b:<20} {r['rundir']:<45} {r['value']:.2f}")
 
 if __name__ == "__main__":
     main()
