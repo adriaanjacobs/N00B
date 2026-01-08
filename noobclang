@@ -22,77 +22,9 @@ if [[ -z "$clang_command" ]]; then
     exit 1
 fi
 
-echo "Using clang command: $clang_command"
+set -x
 
-# Function to check if file is LLVM bitcode
-check_llvm_bitcode() {
-    local file="$1"
-    if ! file "$file" | grep -q "LLVM IR bitcode"; then
-        >&2 echo "Error: $file is not LLVM bitcode. Make sure to compile with -flto or -emit-llvm."
-        exit 1
-    fi
-}
-
-# Separate source files (.o, .c, .cpp, .bc, .ll) and other arguments
-source_files=()
-other_args=()
-file_type=""
-
-for arg in "$@"; do
-    if [[ $arg == *.o ]]; then
-        if [[ -n "$file_type" && "$file_type" != "o" ]]; then
-            >&2 echo "Error: Mixing different source file types (.o with .c/.cpp/.bc/.ll) is not supported"
-            exit 1
-        fi
-        check_llvm_bitcode "$arg"
-        file_type="o"
-        source_files+=("$arg")
-    elif [[ $arg == *.bc ]]; then
-        if [[ -n "$file_type" && "$file_type" != "bc" ]]; then
-            >&2 echo "Error: Mixing different source file types is not supported"
-            exit 1
-        fi
-        check_llvm_bitcode "$arg"
-        file_type="bc"
-        source_files+=("$arg")
-    elif [[ $arg == *.ll ]]; then
-        if [[ -n "$file_type" && "$file_type" != "ll" ]]; then
-            >&2 echo "Error: Mixing different source file types is not supported"
-            exit 1
-        fi
-        file_type="ll"
-        source_files+=("$arg")
-    elif [[ $arg == *.c || $arg == *.cpp ]]; then
-        if [[ -n "$file_type" && "$file_type" != "${arg##*.}" ]]; then
-            >&2 echo "Error: Mixing different source file types is not supported"
-            exit 1
-        fi
-        file_type="${arg##*.}"
-        source_files+=("$arg")
-    else
-        other_args+=("$arg")
-    fi
-done
-
-if [ ${#source_files[@]} -eq 0 ]; then
-    >&2 echo "Error: No source files provided"
-    exit 1
-fi
-
-echo "Source files (${file_type}): ${source_files[@]}"
-echo "Other args: ${other_args[@]}"
-
-# make sure these do not exist to catch any later errors without reusing stale files
-rm noob.tmp.0.5.precodegen.bc noob_linker_script.ld &> /dev/null || true
-
-# First invocation: create the instrumented bitcode with only source files and LTO options
-#   we ignore errors about undefined symbols here, since we don't care about the generated executable
-$clang_command --rtlib=compiler-rt "$@" -flto -fuse-ld=/usr/bin/ld.lld-15 -Xclang -disable-O0-optnone -Xclang -no-opaque-pointers \
+# Actual invocation here
+$clang_command "$@" -flto -fuse-ld=/usr/bin/ld.lld-15 -Xclang -disable-O0-optnone -Xclang -no-opaque-pointers \
         -Xlinker --load-pass-plugin=${NOOB_BUILD_DIR}/llvm-plugin/libllvmnoob.so -Wl,-plugin-opt=no-opaque-pointers \
-        -Wl,--unresolved-symbols=ignore-all \
-        -Wl,-save-temps -o noob.tmp 
-
-# Second invocation: link with libraries and generated linker script, omitting source files
-$clang_command --rtlib=compiler-rt "${other_args[@]}" -fuse-ld=/usr/bin/ld.lld-15 noob.tmp.0.5.precodegen.bc \
-        -Wl,-rpath=${NOOB_BUILD_DIR}/allocator/ ${NOOB_BUILD_DIR}/allocator/libnooballoc.so \
-        -T noob_linker_script.ld -mcmodel=large -no-pie
+        -Wl,-rpath=${NOOB_BUILD_DIR}/allocator/ ${NOOB_BUILD_DIR}/allocator/libnooballoc.so
