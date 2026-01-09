@@ -4,14 +4,6 @@
 
 set -e
 
-# Check for NOOB_BUILD_DIR environment variable
-if [ -z "$NOOB_BUILD_DIR" ]; then
-    >&2 echo "Error: NOOB_BUILD_DIR environment variable is not set."
-    exit 1
-fi
-
-NOOB_BUILD_DIR=$(realpath "$NOOB_BUILD_DIR")
-
 # Figure out whether this script was invoked as "noobclang" or "noobclang++"
 invocation_name=$(basename "$0")
 clang_command="${invocation_name#noob}-15"
@@ -26,6 +18,6 @@ set -x
 
 # Actual invocation here
 $clang_command "$@" -flto -fuse-ld=/usr/bin/ld.lld-15 -Xclang -disable-O0-optnone -Xclang -no-opaque-pointers \
-        -Xlinker --load-pass-plugin=${NOOB_BUILD_DIR}/llvm-plugin/libllvmnoob.so -Wl,-plugin-opt=no-opaque-pointers \
-        -Wl,-rpath=${NOOB_BUILD_DIR}/allocator/ ${NOOB_BUILD_DIR}/allocator/libnooballoc.so \
-        -Wl,-dynamic-linker,${NOOB_BUILD_DIR}/n00bloader/n00bloader
+        -Xlinker --load-pass-plugin=@CMAKE_BINARY_DIR@/llvm-plugin/libllvmnoob.so -Wl,-plugin-opt=no-opaque-pointers \
+        -Wl,-rpath=@CMAKE_BINARY_DIR@/allocator/ @CMAKE_BINARY_DIR@/allocator/libnooballoc.so \
+        -Wl,-dynamic-linker,@CMAKE_BINARY_DIR@/n00bloader/n00bloader

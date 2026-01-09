@@ -41,26 +41,23 @@ With [WLLVM](https://github.com/travitch/whole-program-llvm) or [GLLVM](https://
 # build project with gllvm
 get-bc <exe name>                                   # get bitcode with gllvm
 build/llvm-plugin/run_llvm_noob ir.ll ir.noob.ll    # modify IR to insert bounds checks
-clang-15 ir.noob.ll -fuse-ld=lld-15 -mcmodel=large -no-pie -T noob_linker_script.ld -O2 -o ir.noob -Wl,-rpath=${NOOB_DIR}/build/allocator/ ${NOOB_DIR}/build/allocator/libnooballoc.so
+clang-15 ir.noob.ll \
+        -fuse-ld=/usr/bin/ld.lld-15 -Xclang -no-opaque-pointers \
+        -Wl,-rpath=${NOOB_DIR}/build/allocator/ ${NOOB_DIR}/build/allocator/libnooballoc.so \
+        -Wl,-dynamic-linker,${NOOB_DIR}/n00bloader/n00bloader
 ./ir.noob <args>
-``` 
-
-### Single-step process: integrate with build system
-Another way to handle all of this at once is to use Link Time Optimization and integrate NOOB with the build settings of the project. 
-> **NOTE**: One complication here is that we generate a custom linker script during NOOB's instrumentation, so the linker script doesn't exist yet if we run NOOB at LTO. We work around this by running the LTO stage twice. 
-
-This means passing `-flto -Xclang -no-opaque-pointers` to `CFLAGS` and using `noobclang` or `noobclang++` as `CLD`. Here are the relevant settings for SPEC CPU2006 that we use:
-```bash
-CC           = clang-15 -Xclang -no-opaque-pointers -flto 
-CLD          = NOOB_BUILD_DIR=${NOOB_DIR}/build ${NOOB_DIR}/noobclang 
-CXX          = clang++-15 -Xclang -no-opaque-pointers -flto 
-CXXLD        = NOOB_BUILD_DIR=${NOOB_DIR}/build ${NOOB_DIR}/noobclang++ 
-FC           = we-do-not-support-fortran
 ```
 
-## Running N00B-hardened code
-Sometimes, depending on allocator settings, we need more than 65K mappings (`vm.max_map_count`). Specifically, SPEC06's `dealII` and `sphinx3` seem to require it. 
+For convenience, N00B generates a `noobclang` and `noobclang++` script in the root of the build folder that accepts C/C++/IR code and passes these options already. 
+
+### Single-step process: integrate with build system (noobclang)
+Another way to handle all of this at once is to use Link Time Optimization and integrate NOOB with the build settings of the project. 
+
+This means passing `-flto -Xclang -no-opaque-pointers` to `CFLAGS` and using `noobclang` or `noobclang++` as `C(XX)LD`. Here are the relevant settings for SPEC CPU2006 that we use:
 ```bash
-# use sysctl -p to make this persist across reboots
-sudo sysctl vm.max_map_count=262144
+CC           = clang-15 -Xclang -no-opaque-pointers -flto 
+CLD          = ${NOOB_DIR}/build/noobclang 
+CXX          = clang++-15 -Xclang -no-opaque-pointers -flto 
+CXXLD        = ${NOOB_DIR}/build/noobclang++ 
+FC           = we-do-not-support-fortran
 ```
