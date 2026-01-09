@@ -48,12 +48,18 @@ def parse_rss(time_log: Path):
     return None
 
 def parse_oob_stats(run_dir: Path):
-    """Search for OOB stats in files within run_dir."""
+    """Search for OOB stats in all files within run_dir and sum them up."""
     header = "OOB stats: <oob offset> <occurence>"
+    final_result = {
+        "histogram": {},
+        "total_checks": 0,
+        "managed_checks": 0
+    }
+    found_any = False
+
     try:
-        # Check files, prioritizing newest
+        # Check all files in the directory
         files = [f for f in run_dir.iterdir() if f.is_file()]
-        files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
         
         for f in files:
             try:
@@ -61,23 +67,21 @@ def parse_oob_stats(run_dir: Path):
                 content = f.read_text(errors="ignore")
                 
                 # Check for either specific header or the stats lines
-                if header in content or "Total N00B checks:" in content:
-                    result = {
-                        "histogram": {},
-                        "total_checks": None,
-                        "managed_checks": None
-                    }
+                if header in content:
+                    found_any = True
                     lines = content.splitlines()
 
                     # First pass: look for single line stats
                     for line in lines:
                         if "Total N00B checks:" in line:
                             try:
-                                result["total_checks"] = int(line.split(":", 1)[1].strip())
+                                val = int(line.split(":", 1)[1].strip())
+                                final_result["total_checks"] += val
                             except ValueError: pass
                         elif "Total N00B-managed checks:" in line:
                             try:
-                                result["managed_checks"] = int(line.split(":", 1)[1].strip())
+                                val = int(line.split(":", 1)[1].strip())
+                                final_result["managed_checks"] += val
                             except ValueError: pass
 
                     # Second pass: look for histogram block
@@ -96,16 +100,16 @@ def parse_oob_stats(run_dir: Path):
                             try:
                                 offset = int(parts[0])
                                 count = int(parts[1])
-                                result["histogram"][offset] = count
+                                final_result["histogram"][offset] = final_result["histogram"].get(offset, 0) + count
                             except ValueError:
                                 break
-                    
-                    if result["histogram"] or result["total_checks"] is not None:
-                        return result
             except Exception:
                 continue
     except Exception:
         pass
+
+    if found_any:
+        return final_result
     return None
 
 def parse_text_size(exe_path: Path):
