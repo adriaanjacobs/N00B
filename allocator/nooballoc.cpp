@@ -507,29 +507,29 @@ struct NOOBAllocator {
 };
 
 // never dealloc
-NOOBAllocator* noob_allocator = new NOOBAllocator(std::min(34, NON_NOOB_MIN_RADIX - 1));
+NOOBAllocator noob_allocator{(std::min(34, NON_NOOB_MIN_RADIX - 1))};
 
 void* noob_malloc(size_t nbytes) {
     assert(!hooked);
-    return noob_allocator->allocate(nbytes);
+    return noob_allocator.allocate(nbytes);
 }
 
 void noob_free(void* ptr) {
     assert(!hooked);
     if (!ptr)
         return;
-    noob_allocator->free(ptr);
+    noob_allocator.free(ptr);
 }
 
 void* noob_realloc(void* oldptr, size_t newsize) {
     assert(!hooked);
     if (!oldptr)
-        return noob_allocator->allocate(newsize);
+        return noob_allocator.allocate(newsize);
     if (!newsize) {
-        noob_allocator->free(oldptr);
+        noob_allocator.free(oldptr);
         return NULL;
     }
-    return noob_allocator->realloc(oldptr, newsize);
+    return noob_allocator.realloc(oldptr, newsize);
 }
 
 void* noob_memalign(size_t alignment, size_t size) {
@@ -538,12 +538,12 @@ void* noob_memalign(size_t alignment, size_t size) {
         return NULL;
     assert(std::popcount(alignment) == 1); // pow2. might fail if 0
     size = std::max(alignment, std::bit_ceil(size));
-    return noob_allocator->allocate(size);
+    return noob_allocator.allocate(size);
 }
 
 void* noob_calloc(size_t nbytes) {
     assert(!hooked);
-    return noob_allocator->zalloc(nbytes);
+    return noob_allocator.zalloc(nbytes);
 }
 
 size_t noob_usable_size(void* ptr) {
