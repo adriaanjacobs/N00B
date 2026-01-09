@@ -27,4 +27,5 @@ set -x
 # Actual invocation here
 $clang_command "$@" -flto -fuse-ld=/usr/bin/ld.lld-15 -Xclang -disable-O0-optnone -Xclang -no-opaque-pointers \
         -Xlinker --load-pass-plugin=${NOOB_BUILD_DIR}/llvm-plugin/libllvmnoob.so -Wl,-plugin-opt=no-opaque-pointers \
-        -Wl,-rpath=${NOOB_BUILD_DIR}/allocator/ ${NOOB_BUILD_DIR}/allocator/libnooballoc.so
+        -Wl,-rpath=${NOOB_BUILD_DIR}/allocator/ ${NOOB_BUILD_DIR}/allocator/libnooballoc.so \
+        -Wl,-dynamic-linker,${NOOB_BUILD_DIR}/n00bloader/n00bloader
