@@ -338,6 +338,47 @@ struct NOOBSizeAllocator {
     }
 };
 
+static void verify_noob_memlayout() {
+    // Verify memory layout:
+    // The first mapping MUST be the large PROT_NONE reservation ending at NOOB_MAX_ADDR.
+    FILE* f = fopen("/proc/self/maps", "r");
+    if (!f) {
+        perror("fopen /proc/self/maps");
+        abort();
+    }
+    
+    unsigned long start, end;
+    char perms[5];
+    char line[1024];
+    
+    if (!fgets(line, sizeof(line), f)) {
+        fprintf(stderr, "Startup check failed: /proc/self/maps is empty\n");
+        abort();
+    }
+    fclose(f);
+
+    int ret = sscanf(line, "%lx-%lx %4s", &start, &end, perms);
+    if (ret != 3) {
+        fprintf(stderr, "Startup check failed: Could not parse first line of maps: %s", line);
+        abort();
+    }
+
+    bool is_reservation = (end == NOOB_MAX_ADDR) && (strcmp(perms, "---p") == 0);
+
+    if (!is_reservation) {
+        fprintf(stderr, "Startup check failed: Expected first mapping to be PROT_NONE ending at 0x%lx.\n", NOOB_MAX_ADDR);
+        fprintf(stderr, "Found instead: %s", line);
+        abort();
+    }
+
+    // Unmap the reservation
+    if (munmap((void*) start, end - start) != 0) {
+        perror("munmap reserved region");
+        abort();
+    }
+    fprintf(stderr, "Verified and unmapped N00B reservation [0x%lx-0x%lx]\n", start, end);            
+}
+
 // if we are linking into a hardened program, this function will be defined by the NOOB compiler
 extern "C" void noob_initialize_noobstacks() __attribute__((weak));
 
@@ -352,48 +393,9 @@ struct NOOBAllocator {
         max_radix{max_radix}
     {
         fprintf(stderr, "Initializing NOOB...\n");
-
-        {
-            // Verify memory layout:
-            // The first mapping MUST be the large PROT_NONE reservation ending at NOOB_MAX_ADDR.
-            FILE* f = fopen("/proc/self/maps", "r");
-            if (!f) {
-                perror("fopen /proc/self/maps");
-                abort();
-            }
-            
-            unsigned long start, end;
-            char perms[5];
-            char line[1024];
-            
-            if (!fgets(line, sizeof(line), f)) {
-                fprintf(stderr, "Startup check failed: /proc/self/maps is empty\n");
-                abort();
-            }
-            fclose(f);
-
-            int ret = sscanf(line, "%lx-%lx %4s", &start, &end, perms);
-            if (ret != 3) {
-                fprintf(stderr, "Startup check failed: Could not parse first line of maps: %s", line);
-                abort();
-            }
-
-            bool is_reservation = (end == NOOB_MAX_ADDR) && (strcmp(perms, "---p") == 0);
-
-            if (!is_reservation) {
-                fprintf(stderr, "Startup check failed: Expected first mapping to be PROT_NONE ending at 0x%lx.\n", NOOB_MAX_ADDR);
-                fprintf(stderr, "Found instead: %s", line);
-                abort();
-            }
-
-            // Unmap the reservation
-            if (munmap((void*) start, end - start) != 0) {
-                perror("munmap reserved region");
-                abort();
-            }
-            fprintf(stderr, "Verified and unmapped N00B reservation [0x%lx-0x%lx]\n", start, end);            
-        }
         
+        verify_noob_memlayout();
+
         if (noob_initialize_noobstacks) // the function exists. we are linked into a hardened NOOB program
             noob_initialize_noobstacks();
 
