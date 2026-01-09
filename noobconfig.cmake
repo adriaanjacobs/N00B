@@ -45,6 +45,8 @@ else()
     message(FATAL_ERROR "Unsupported processor: ${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 
+math(EXPR NOOB_MAX_ADDR "(${NON_NOOB_MIN_RADIX}-${NOOB_MIN_RADIX})<<42" OUTPUT_FORMAT HEXADECIMAL)
+
 set(ARITH_LEEWAY_WIDTH          0)
 set(ARITH_LEEWAY_OCCUPIED_BITS  0b00)
 set(NOOB_STACK_SIZE             0x400000ULL) # bzip2 needs large objects on the stack!

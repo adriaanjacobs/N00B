@@ -278,7 +278,7 @@ SECTIONS {
   We move all relevant code and non-noob data sections to unmanaged memory so external code compiled for 
   the small code model can still access its data when it is placed at world's end.
 */
-unmanaged_start = (${NON_NOOB_MIN_RADIX}-${NOOB_MIN_RADIX})<<42;
+unmanaged_start = ${NOOB_MAX_ADDR};
 
 /*
   Noob-managed globals
