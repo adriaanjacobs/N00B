@@ -16,7 +16,7 @@ add_subdirectory(n00bloader)
 
 # generate config.h include file
 configure_file(
-    ${CMAKE_SOURCE_DIR}/config.h.in
+    ${CMAKE_SOURCE_DIR}/templates/config.h.in
     ${CMAKE_BINARY_DIR}/include/NOOB/config.h
 )
 include_directories(${CMAKE_BINARY_DIR}/include/)

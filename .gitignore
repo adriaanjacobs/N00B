@@ -30,5 +30,7 @@
 
 !scripts/
 
+!templates/
+
 !test/
 !test/**/
