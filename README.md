@@ -61,3 +61,9 @@ CXX          = clang++-15 -Xclang -no-opaque-pointers -flto
 CXXLD        = ${NOOB_DIR}/build/noobclang++ 
 FC           = we-do-not-support-fortran
 ```
+
+### Benchmarking
+We generate SPEC CPU2006 (`<build>/templates/spec06/`) and SPEC CPU2017 (`<build>/templates/spec17/`) configs for benchmarking N00B: 
+* `clang15-lto-baseline.cfg` runs without any N00B changes, but with the same compiler and optimization options.
+* `clang15-lto-nooballoc.cfg` measures the impact of N00B's memory layout requirements, with `nooballoc` linked into the binaries, and `n00bloader` to place them above `NOOB_MAX_ADDR`.  
+* `clang15-lto-noob.cfg` runs with full N00B hardening enabled. 

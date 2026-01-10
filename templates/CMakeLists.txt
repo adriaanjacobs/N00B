@@ -1,5 +1,3 @@
-
-
 # generate config.h include file
 configure_file(
     config.h.in
@@ -14,3 +12,4 @@ configure_file(
 )
 file(CREATE_LINK ${CMAKE_BINARY_DIR}/noobclang ${CMAKE_BINARY_DIR}/noobclang++ SYMBOLIC)
 
+add_subdirectory(spec06)
