@@ -14,21 +14,11 @@ include(noobconfig.cmake)
 
 add_subdirectory(n00bloader)
 
-# generate config.h include file
-configure_file(
-    ${CMAKE_SOURCE_DIR}/templates/config.h.in
-    ${CMAKE_BINARY_DIR}/include/NOOB/config.h
-)
+# generate a bunch of scripts & utilities
+add_subdirectory(templates)
+
 include_directories(${CMAKE_BINARY_DIR}/include/)
 include_directories(include)
-
-# generate noobclang(++)
-configure_file(
-    ${CMAKE_SOURCE_DIR}/templates/noobclang
-    ${CMAKE_BINARY_DIR}/noobclang
-    @ONLY
-)
-file(CREATE_LINK ${CMAKE_BINARY_DIR}/noobclang ${CMAKE_BINARY_DIR}/noobclang++ SYMBOLIC)
 
 add_subdirectory(llvm-plugin)
 add_subdirectory(allocator)
