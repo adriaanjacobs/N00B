@@ -4,7 +4,15 @@ configure_file(
     ${CMAKE_BINARY_DIR}/include/NOOB/config.h
 )
 
-# generate noobclang(++)
+# generate nooballocclang(++)
+configure_file(
+    noobclang
+    ${CMAKE_BINARY_DIR}/nooballocclang
+    @ONLY
+)
+file(CREATE_LINK ${CMAKE_BINARY_DIR}/nooballocclang ${CMAKE_BINARY_DIR}/nooballocclang++ SYMBOLIC)
+# and noobclang(++)
+set(NOOB_PLUGIN_FLAGS "-Xlinker --load-pass-plugin=${CMAKE_BINARY_DIR}/llvm-plugin/libllvmnoob.so -Wl,-plugin-opt=no-opaque-pointers")
 configure_file(
     noobclang
     ${CMAKE_BINARY_DIR}/noobclang
@@ -27,8 +35,8 @@ configure_file(
 )
 
 ## then nooballoc
-set(NOOB_CLD "${NOOB_CLD} -Wl,-rpath=${CMAKE_BINARY_DIR}/allocator/ ${CMAKE_BINARY_DIR}/allocator/libnooballoc.so -Wl,-dynamic-linker,${CMAKE_BINARY_DIR}/n00bloader/n00bloader")
-set(NOOB_CXXLD "${NOOB_CXXLD} -Wl,-rpath=${CMAKE_BINARY_DIR}/allocator/ ${CMAKE_BINARY_DIR}/allocator/libnooballoc.so -Wl,-dynamic-linker,${CMAKE_BINARY_DIR}/n00bloader/n00bloader")
+set(NOOB_CLD "${CMAKE_BINARY_DIR}/nooballocclang")
+set(NOOB_CXXLD "${NOOB_CLD}++")
 set(SPEC_EXT "nooballoc")
 set(NOOB_STRIPTOP "-DNOOB_STRIPTOP")
 configure_file(
