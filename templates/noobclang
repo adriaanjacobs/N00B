@@ -34,7 +34,7 @@ flags=("-flto" "-Xclang" "-no-opaque-pointers")
 if [[ $linking -eq 1 ]]; then
     flags+=(
         "-fuse-ld=lld-15"
-        "@NOOB_PLUGIN_FLAGS@"
+        @NOOB_PLUGIN_FLAGS@
         "-Wl,-rpath=@CMAKE_BINARY_DIR@/allocator/"
         "@CMAKE_BINARY_DIR@/allocator/libnooballoc.so"
         "-Wl,-dynamic-linker,@CMAKE_BINARY_DIR@/n00bloader/n00bloader"

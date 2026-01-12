@@ -12,7 +12,7 @@ configure_file(
 )
 file(CREATE_LINK ${CMAKE_BINARY_DIR}/nooballocclang ${CMAKE_BINARY_DIR}/nooballocclang++ SYMBOLIC)
 # and noobclang(++)
-set(NOOB_PLUGIN_FLAGS "-Xlinker --load-pass-plugin=${CMAKE_BINARY_DIR}/llvm-plugin/libllvmnoob.so -Wl,-plugin-opt=no-opaque-pointers")
+set(NOOB_PLUGIN_FLAGS "\"-Xlinker\" \"--load-pass-plugin=${CMAKE_BINARY_DIR}/llvm-plugin/libllvmnoob.so\" \"-Wl,-plugin-opt=no-opaque-pointers\"")
 configure_file(
     noobclang
     ${CMAKE_BINARY_DIR}/noobclang
