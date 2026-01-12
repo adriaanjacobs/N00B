@@ -570,27 +570,29 @@ static uintptr_t noob_embed_inpointer_tag(uintptr_t ptr, uint8_t tag) {
 
 #if TRACK_ARITH_STATS
 static uint64_t cnt_in_bounds_arithmetic = 0;
-static std::map<int64_t, uint64_t> cnt_out_of_bounds_arithmetic;
+static std::map<void*, std::map<int64_t, uint64_t>> cnt_out_of_bounds_arithmetic;
 
 [[gnu::destructor]]
 void print_stats() {
-    fprintf(stderr, "OOB stats: <oob offset> <occurence>\n");
+    fprintf(stderr, "OOB stats: <addr> <oob offset> <occurence>\n");
     fprintf(stderr, "0\t\t%lu\n", cnt_in_bounds_arithmetic);
-    for (auto& [offset, cnt] : cnt_out_of_bounds_arithmetic) {
-        fprintf(stderr, "%ld\t\t%lu\n", offset, cnt);
+    for (auto& [addr, stats] : cnt_out_of_bounds_arithmetic) {
+        for (auto& [offset, cnt] : stats) {
+            fprintf(stderr, "%p\t\t%ld\t\t%lu\n", addr, offset, cnt);
+        }
     }
 }
 
-void record_oob_status(intptr_t obj_addr, size_t obj_size, void* ptr) {
+void record_oob_status(intptr_t obj_addr, size_t obj_size, void* ptr, void* invoking_addr) {
     auto offset = (intptr_t) ptr - obj_addr;
     if (offset >= 0 && (uint64_t) offset < obj_size) {
         cnt_in_bounds_arithmetic++;
     } else { // oob
         assert(offset != 0);
         if (offset < 0)
-            cnt_out_of_bounds_arithmetic[offset]++;
+            cnt_out_of_bounds_arithmetic[invoking_addr][offset]++;
         else
-            cnt_out_of_bounds_arithmetic[offset - (obj_size - 1)]++;
+            cnt_out_of_bounds_arithmetic[invoking_addr][offset - (obj_size - 1)]++;
     }
 }
 #endif
@@ -649,9 +651,9 @@ void noob_access_check(void* ptr, void* base, bool checkDeref, bool checkArith) 
     intptr_t origobj = noob_embed_inpointer_tag((uintptr_t) base, embedded_tag);
     origobj &= ~((1ULL << radix) - 1);  // remove offset -> ptr to start of object
     assert(origobj % (1UL << radix) == 0);
-    record_oob_status(origobj, 1UL << radix, base); // check if the base is coming from OOB
+    record_oob_status(origobj, 1UL << radix, base, __builtin_return_address(0)); // check if the base is coming from OOB
     if (checkArith && !checkDeref) // non-dereferenced escape site, check if the escaping pointer is OOB
-        record_oob_status(origobj, 1UL << radix, ptr);
+        record_oob_status(origobj, 1UL << radix, ptr, __builtin_return_address(0));
 #endif
 
     if (!checkDeref) 

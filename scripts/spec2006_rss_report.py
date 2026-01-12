@@ -49,11 +49,10 @@ def parse_rss(time_log: Path):
 
 def parse_oob_stats(run_dir: Path):
     """Search for OOB stats in all files within run_dir and sum them up."""
-    header = "OOB stats: <oob offset> <occurence>"
+    new_header = "OOB stats: <addr> <oob offset> <occurence>"
     final_result = {
         "histogram": {},
-        "total_checks": 0,
-        "managed_checks": 0
+        "addr_counts": {},
     }
     found_any = False
 
@@ -66,42 +65,40 @@ def parse_oob_stats(run_dir: Path):
                 # Read file content (ignoring errors for binary files)
                 content = f.read_text(errors="ignore")
                 
-                # Check for either specific header or the stats lines
-                if header in content:
+                # Check for NEW header
+                if new_header in content:
                     found_any = True
                     lines = content.splitlines()
-
-                    # First pass: look for single line stats
-                    for line in lines:
-                        if "Total N00B checks:" in line:
-                            try:
-                                val = int(line.split(":", 1)[1].strip())
-                                final_result["total_checks"] += val
-                            except ValueError: pass
-                        elif "Total N00B-managed checks:" in line:
-                            try:
-                                val = int(line.split(":", 1)[1].strip())
-                                final_result["managed_checks"] += val
-                            except ValueError: pass
-
-                    # Second pass: look for histogram block
                     found_header = False
                     for line in lines:
-                        if header in line:
+                        if new_header in line:
                             found_header = True
                             continue
                         
                         if found_header:
                             parts = line.split()
-                            if len(parts) < 2:
-                                # Stop if line doesn't look like "offset count"
-                                if not line.strip(): continue
-                                break
-                            try:
-                                offset = int(parts[0])
-                                count = int(parts[1])
-                                final_result["histogram"][offset] = final_result["histogram"].get(offset, 0) + count
-                            except ValueError:
+                            if not parts: continue
+                            
+                            # Parse new format lines
+                            # 1. In-bounds: "0 <count>"
+                            if len(parts) == 2 and parts[0] == "0":
+                                try:
+                                    count = int(parts[1])
+                                    final_result["histogram"][0] = final_result["histogram"].get(0, 0) + count
+                                except ValueError: break
+                            # 2. Out-of-bounds: "<addr> <offset> <count>"
+                            elif len(parts) == 3:
+                                try:
+                                    addr = parts[0]
+                                    offset = int(parts[1])
+                                    count = int(parts[2])
+                                    final_result["histogram"][offset] = final_result["histogram"].get(offset, 0) + count
+                                    
+                                    if offset not in final_result["addr_counts"]:
+                                        final_result["addr_counts"][offset] = set()
+                                    final_result["addr_counts"][offset].add(addr)
+                                except ValueError: break
+                            else:
                                 break
             except Exception:
                 continue
@@ -230,13 +227,8 @@ def main():
                 print(f"{b:<20} {r['rundir']:<45}")
                 data = r["value"]
                 
-                # Print global counters if present
-                if data.get("total_checks") is not None:
-                    print(f"    Total Checks:   {data['total_checks']}")
-                if data.get("managed_checks") is not None:
-                    print(f"    Managed Checks: {data['managed_checks']}")
-                
                 stats = data.get("histogram", {})
+                addr_counts = data.get("addr_counts", {})
                 if stats:
                     # Print 0 (in-bounds) first
                     if 0 in stats:
@@ -244,7 +236,10 @@ def main():
                     # Print others sorted
                     for offset in sorted(stats.keys()):
                         if offset != 0:
-                            print(f"    Offset {offset:<10}: {stats[offset]}")
+                            msg = f"    Offset {offset:<10}: {stats[offset]}"
+                            if offset in addr_counts:
+                                msg += f" ({len(addr_counts[offset])})"
+                            print(msg)
                 print("")
     else:
         colname = "CodeSize(KB)" if args.code_size else "RSS(KB)"
