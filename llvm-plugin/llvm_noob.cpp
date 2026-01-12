@@ -123,6 +123,20 @@ void NOOBInstrumentationPass::extendNOOBLinkerScript(std::string& noobLinkerScri
     noobLinkerScript.append(sections.str());
 }
 
+bool belongsToUnsafeModule(llvm::Function* function) {
+    auto selectModule = getenv("NOOB_SELECT");
+    if (!selectModule)
+        return true;
+    if (auto subProgram = function->getSubprogram()) {
+        auto filename = subProgram->getFilename();        
+        if (filename.contains(selectModule)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // we analyze & optimize the placement of NOOB bounds checks here
 //  there are 2 types of NOOB bounds checks: 
 //      1. dereference checks: verify that the tag in the top pointer bits matches the tag embedded in the pointer address
@@ -147,6 +161,9 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
     };
 
     for (auto& access : unsafeAccessInfo.unsafeAccesses) {
+        if (!belongsToUnsafeModule(access->getFunction()))
+            continue;
+
         auto ptr = llvm::getLoadStorePointerOperand(access);
         ASSERT_ELSE_UNKOWN(ptr, access);
         if (auto inst = llvm::dyn_cast<llvm::Instruction>(ptr))
@@ -167,6 +184,9 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
         dbg_checkInfos.insert(newCheckInfo);
 #endif
     }
+
+    if (auto selectedModule = getenv("NOOB_SELECT"))
+        llvm::errs() << "NOOB_SELECT=" << selectedModule << " resulted in " << dbg_checkInfos.size() << "/" << unsafeAccessInfo.unsafeAccesses.size() << " (" << 100.0f*dbg_checkInfos.size()/(float)unsafeAccessInfo.unsafeAccesses.size() << "%) unsafe memaccess instrumented\n";
 
     LoopHoister loopHoister{module, MAM};
     loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, !EMIT_RUNTIME_CALLS && !EMULATE_LOWFAT); // lowfat and runtime debug cannot handle non-postdom
@@ -211,6 +231,8 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
             // the user is always an instruction here!! (otherwise we're doing an unsafe but constant escape??)
             auto userInst = llvm::dyn_cast<llvm::Instruction>(user);
             ASSERT_ELSE_UNKOWN(userInst, user);
+            if (!belongsToUnsafeModule(userInst->getFunction()))
+                continue;
 #if CHECK_ESCAPE_SITES
             // this use shouldnt exist yet
             ASSERT_ELSE_UNKOWN(!funcToCheckPoints[userInst->getFunction()].count(use), user);
@@ -226,6 +248,14 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
     for (auto& [checkInfo, _] : checkInfoToUses) {
         bool dbg = dbg_checkInfoToCopy.try_emplace(checkInfo, *checkInfo).second;
         assert(dbg);
+    }
+
+    if (dbg_checkInfoToCopy.empty() && getenv("NOOB_SELECT")) {
+        llvm::errs().changeColor(llvm::raw_ostream::RED, true);
+        llvm::errs() << "\n\n********************************************************************************\n";
+        llvm::errs() << "WARNING: 'NOOB_SELECT' specified ('" << getenv("NOOB_SELECT") << "') but no matching modules found!\n";
+        llvm::errs() << "********************************************************************************\n\n";
+        llvm::errs().resetColor();
     }
 
     // then optimize the list _again_. the loophoister will share expanded SCEVs for both i think
