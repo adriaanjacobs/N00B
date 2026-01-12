@@ -1,6 +1,5 @@
 #! /bin/bash
-# Short script that wraps clang's LTO invocations to run the LTO separately before the linking stage
-# This helps us use an LTO-generated linker script during the linking stage
+# Short script that applies NOOB flags to clang-15
 
 set -e
 
@@ -19,10 +18,30 @@ if [[ -z "$clang_command" ]]; then
     exit 1
 fi
 
+# Check if we are linking (not compile-only, preprocess-only, or assemble-only)
+linking=1
+for arg in "$@"; do
+    if [[ "$arg" == "-c" || "$arg" == "-S" || "$arg" == "-E" ]]; then
+        linking=0
+        break
+    fi
+done
+
+# Base flags
+flags=("-flto" "-Xclang" "-no-opaque-pointers")
+
+# Add linker flags if linking
+if [[ $linking -eq 1 ]]; then
+    flags+=(
+        "-fuse-ld=lld-15"
+        "@NOOB_PLUGIN_FLAGS@"
+        "-Wl,-rpath=@CMAKE_BINARY_DIR@/allocator/"
+        "@CMAKE_BINARY_DIR@/allocator/libnooballoc.so"
+        "-Wl,-dynamic-linker,@CMAKE_BINARY_DIR@/n00bloader/n00bloader"
+    )
+fi
+
 set -x
 
 # Actual invocation here
-$clang_command "$@" -flto -fuse-ld=/usr/bin/ld.lld-15 -Xclang -disable-O0-optnone -Xclang -no-opaque-pointers \
-        @NOOB_PLUGIN_FLAGS@ \
-        -Wl,-rpath=@CMAKE_BINARY_DIR@/allocator/ @CMAKE_BINARY_DIR@/allocator/libnooballoc.so \
-        -Wl,-dynamic-linker,@CMAKE_BINARY_DIR@/n00bloader/n00bloader
+$clang_command "$@" "${flags[@]}"
