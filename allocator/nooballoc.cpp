@@ -554,7 +554,7 @@ size_t noob_usable_size(void* ptr) {
     return 1ULL << radix;
 }
 
-static uintptr_t noob_embed_inpointer_tag(uintptr_t ptr, uint8_t tag) {
+static uintptr_t noob_embed_inpointer_tag(uintptr_t ptr, uint16_t tag) {
     auto radix = extract_radix(ptr);
     auto offset = ptr & ((1ULL << radix) - 1);
 

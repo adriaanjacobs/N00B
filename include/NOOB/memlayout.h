@@ -33,12 +33,12 @@ inline uint8_t extract_radix(uintptr_t ptr) {
     return ((ptr >> 42) + NOOB_MIN_RADIX) & UINT8_MAX;
 }
 
-inline uint8_t extract_inpointertag(uintptr_t ptr) {
+inline uint16_t extract_inpointertag(uintptr_t ptr) {
     auto radix = extract_radix(ptr);
     return (ptr >> radix) & ((1U << TAG_WIDTH) - 1);
 }
 
-inline uint8_t extract_toptag(uintptr_t ptr) {
+inline uint16_t extract_toptag(uintptr_t ptr) {
     return ptr >> NOOB_TOPTAG_START;
 }
 
