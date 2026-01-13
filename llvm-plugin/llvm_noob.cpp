@@ -744,6 +744,24 @@ void NOOBInstrumentationPass::moveUnsafeAllocasToNOOBStacks(llvm::Module& module
     }
 }
 
+void NOOBInstrumentationPass::maskExternalPointerArguments(llvm::Module& module) {
+    for (auto& func : module)
+        for (auto& bb : func)
+            for (auto& inst : bb)
+                if (auto call = llvm::dyn_cast<llvm::CallBase>(&inst))
+                    if (auto calledFunction = call->getCalledFunction())
+                        if (calledFunction->isDeclaration())
+                            for (auto& arg : call->args()) 
+                                if (arg->getType()->isPointerTy()) {
+                                    auto insertBefore = call;
+                                    auto ptrAsInt = castToInt64Ty(arg, insertBefore);
+                                    auto mask = llvm::ConstantInt::get(ptrAsInt->getType(), llvm::APInt::getLowBitsSet(64, NOOB_TOPTAG_START));
+                                    auto maskedInt = llvm::BinaryOperator::CreateAnd(ptrAsInt, mask, "masked.ptr", insertBefore);
+                                    auto maskedPtr = createBitOrPointerCastIfNecessary(maskedInt, arg->getType(), "", insertBefore);
+                                    arg.set(maskedPtr);
+                                }
+}
+
 llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm::ModuleAnalysisManager& MAM) { 
     // find unsafe globals up front, before modification
     const auto radixToGlobals = findUnsafeGlobals(module, MAM);
@@ -755,6 +773,10 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
     auto checkInfoToUses = createInstrumentationPlans(module, MAM);
     // now actually instrument pointer arithmetic and dereferences
     applyNOOBChecks(module, MAM, checkInfoToUses);
+
+#if MASK_EXT_PTR_ARGS
+    maskExternalPointerArguments(module);
+#endif
 
     // now, start instrumenting globals & allocas
     std::string noobLinkerScript {

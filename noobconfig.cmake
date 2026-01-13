@@ -58,6 +58,8 @@ set(CHECK_POINTER_DEREFERENCES  1)
 set(USE_BRANCHING_CHECKS        1)
 set(SOUND_POINTER_DETECTION     1)
 
+set(MASK_EXT_PTR_ARGS           0)
+
 set(REPLACE_STACK_ALLOCS        1)
 set(REMAP_GLOBALS               0)
 

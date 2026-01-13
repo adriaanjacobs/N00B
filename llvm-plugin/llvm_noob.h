@@ -43,6 +43,8 @@ class NOOBInstrumentationPass : public llvm::PassInfoMixin<NOOBInstrumentationPa
     llvm::DenseMap<llvm::Function*, llvm::DenseSet<llvm::AllocaInst*>> findUnsafeAllocas(llvm::Module& module, llvm::ModuleAnalysisManager& MAM);
     void moveUnsafeAllocasToNOOBStacks(llvm::Module& module, const llvm::DenseMap<llvm::Function*, llvm::DenseSet<llvm::AllocaInst*>>& unsafeAllocas);
 
+    void maskExternalPointerArguments(llvm::Module& module);
+
     struct BasePtrInfo {
         llvm::Value* radix;
         llvm::Value* origObj;
