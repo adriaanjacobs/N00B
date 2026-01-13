@@ -23,6 +23,8 @@ static_assert(ARITH_LEEWAY_OCCUPIED_BITS < (1U << ARITH_LEEWAY_WIDTH));
 #define SOUND_POINTER_DETECTION     ${SOUND_POINTER_DETECTION}
 
 #define MASK_EXT_PTR_ARGS           ${MASK_EXT_PTR_ARGS}
+#define COUNT_NOOB_FAILURES         ${COUNT_NOOB_FAILURES}
+static_assert(COUNT_NOOB_FAILURES ? !CHECK_POINTER_ARITHMETIC : 0, "Masked ptr counting only implemented for deref-only");
 
 #define REPLACE_STACK_ALLOCS        ${REPLACE_STACK_ALLOCS}
 #define REMAP_GLOBALS               ${REMAP_GLOBALS}

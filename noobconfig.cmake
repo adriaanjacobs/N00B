@@ -59,6 +59,7 @@ set(USE_BRANCHING_CHECKS        1)
 set(SOUND_POINTER_DETECTION     1)
 
 set(MASK_EXT_PTR_ARGS           0)
+set(COUNT_NOOB_FAILURES         0)
 
 set(REPLACE_STACK_ALLOCS        1)
 set(REMAP_GLOBALS               0)

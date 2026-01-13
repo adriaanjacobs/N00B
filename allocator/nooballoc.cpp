@@ -59,6 +59,12 @@ struct run_on_destruct {
 #define NOOB_OBJS_PER_ARENA         (1U << TAG_WIDTH)
 #define TAG_T_MAX                   (NOOB_OBJS_PER_ARENA - 1UL)
 
+// implemented in instrumented module
+#if COUNT_NOOB_FAILURES
+extern "C" uint64_t noob_failed_checks;
+extern "C" uint64_t noob_total_dereferences;
+#endif
+
 bool noob_is_nonnoob(uintptr_t ptr) {
     return extract_radix(ptr) >= NON_NOOB_MIN_RADIX;
 }
@@ -484,7 +490,13 @@ struct NOOBAllocator {
 #if NOOB_TAG_POINTERS
         // now for a quick security check
         // check that it is still pointing to the original alloc
-        assert(extract_inpointertag((uintptr_t) ptr) == extract_toptag((uintptr_t) ptr));
+        bool freed_pointer_in_bounds = extract_inpointertag((uintptr_t) ptr) == extract_toptag((uintptr_t) ptr);
+#if COUNT_NOOB_FAILURES
+        noob_total_dereferences++;
+        noob_failed_checks += !freed_pointer_in_bounds;
+#else
+        assert(freed_pointer_in_bounds);
+#endif
 #endif
         // check that it is pointing to the base of the alloc
         assert(extract_offset((uintptr_t) ptr) == 0);
@@ -572,17 +584,6 @@ static uintptr_t noob_embed_inpointer_tag(uintptr_t ptr, uint16_t tag) {
 static uint64_t cnt_in_bounds_arithmetic = 0;
 static std::map<void*, std::map<int64_t, uint64_t>> cnt_out_of_bounds_arithmetic;
 
-[[gnu::destructor]]
-void print_stats() {
-    fprintf(stderr, "OOB stats: <addr> <oob offset> <occurence>\n");
-    fprintf(stderr, "0\t\t%lu\n", cnt_in_bounds_arithmetic);
-    for (auto& [addr, stats] : cnt_out_of_bounds_arithmetic) {
-        for (auto& [offset, cnt] : stats) {
-            fprintf(stderr, "%p\t\t%ld\t\t%lu\n", addr, offset, cnt);
-        }
-    }
-}
-
 void record_oob_status(intptr_t obj_addr, size_t obj_size, void* ptr, void* invoking_addr) {
     auto offset = (intptr_t) ptr - obj_addr;
     if (offset >= 0 && (uint64_t) offset < obj_size) {
@@ -596,6 +597,25 @@ void record_oob_status(intptr_t obj_addr, size_t obj_size, void* ptr, void* invo
     }
 }
 #endif
+
+[[gnu::destructor]]
+void print_stats() {
+#if TRACK_ARITH_STATS
+    fprintf(stderr, "OOB stats: <addr> <oob offset> <occurence>\n");
+    fprintf(stderr, "0\t\t%lu\n", cnt_in_bounds_arithmetic);
+    for (auto& [addr, stats] : cnt_out_of_bounds_arithmetic) {
+        for (auto& [offset, cnt] : stats) {
+            fprintf(stderr, "%p\t\t%ld\t\t%lu\n", addr, offset, cnt);
+        }
+    }
+#endif
+
+#if COUNT_NOOB_FAILURES
+    fprintf(stderr, "noob_total_dereferences = %ld\n", noob_total_dereferences);
+    fprintf(stderr, "noob_failed_checks = %ld (%.2f%%)\n", noob_failed_checks, 100.0f*noob_failed_checks/noob_total_dereferences);
+#endif
+}
+
 
 static void check_ptr_arithmetic(void* ptr, void* base) {
     auto baseint = (uintptr_t) base;

@@ -189,7 +189,9 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
         llvm::errs() << "NOOB_SELECT=" << selectedModule << " resulted in " << dbg_checkInfos.size() << "/" << unsafeAccessInfo.unsafeAccesses.size() << " (" << 100.0f*dbg_checkInfos.size()/(float)unsafeAccessInfo.unsafeAccesses.size() << "%) unsafe memaccess instrumented\n";
 
     LoopHoister loopHoister{module, MAM};
-    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, !EMIT_RUNTIME_CALLS && !EMULATE_LOWFAT); // lowfat and runtime debug cannot handle non-postdom
+    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, !EMIT_RUNTIME_CALLS && !EMULATE_LOWFAT && !COUNT_NOOB_FAILURES);
+    // lowfat and runtime debug cannot handle non-postdom
+    // neither can our masked ptr counting
 
     // keep track of the checkinfos that describe dereferences
     //  this is because they may be deleted (not modified, we check this later) by the next round of optimizations
@@ -396,6 +398,12 @@ llvm::Value* NOOBInstrumentationPass::computePoisonMaskAtDerefSite(const CheckIn
     }
 }
 
+static void incrementGlobal(llvm::GlobalVariable* global, llvm::Instruction* insertBefore) {
+    llvm::Instruction* count = new llvm::LoadInst(global->getValueType(), global, "", insertBefore);
+    count = llvm::BinaryOperator::CreateAdd(count, llvm::ConstantInt::get(global->getValueType(), llvm::APInt{64, 1}), "", insertBefore);
+    new llvm::StoreInst(count, global, insertBefore);
+}
+
 // actually modify the program to insert the checks and update the usesToReplace
 void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::ModuleAnalysisManager& MAM, const llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>>& checkInfoToUses) {
     //  keep in mind here that multiple uses can use the same instrumentation
@@ -422,9 +430,17 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
         llvm::MDBuilder MDHelper{context};
         auto weights = MDHelper.createBranchWeights(1, 1000);
         auto ifZeroBlockTerm = llvm::SplitBlockAndInsertIfThen(isNotZero, ret, true, weights);
-        
+
+#if COUNT_NOOB_FAILURES
+        auto total_checks_counter = new llvm::GlobalVariable(module, int64Ty, false, llvm::GlobalValue::ExternalLinkage, llvm::ConstantInt::getNullValue(int64Ty), "noob_total_dereferences");
+        incrementGlobal(total_checks_counter, isNotZero);
+
+        auto failed_checks_counter = new llvm::GlobalVariable(module, int64Ty, false, llvm::GlobalValue::ExternalLinkage, llvm::ConstantInt::getNullValue(int64Ty), "noob_failed_checks");
+        incrementGlobal(failed_checks_counter, ifZeroBlockTerm);
+#else
         auto trapFn = llvm::Intrinsic::getDeclaration(&module, llvm::Intrinsic::debugtrap);
         auto callTrap = llvm::CallInst::Create(trapFn, "", ifZeroBlockTerm);
+#endif
     }
 
     // embed the lookup table if necessary
@@ -553,7 +569,8 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
                 // check if the poisonMask is 0
                 auto trapIfNotZero = llvm::CallInst::Create(noob_assert_zero_fn, {poisonMask}, "", insertBefore);
             } else {
-#if __x86_64__ // LAMU48 platforms have only limited canonical bits: 63 and 47. Compute a one-bit mask poison mask for the 47th bit
+                assert(!COUNT_NOOB_FAILURES); // should not reach here
+#if __x86_64__ // LAMU48 platforms have only limited canonical bits: 63th and 47th. Compute a one-bit mask poison mask for the 47th bit
                 auto maskIsZero = new llvm::ICmpInst(insertBefore, llvm::ICmpInst::ICMP_EQ, poisonMask, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, 0}));
                 poisonMask = llvm::SelectInst::Create(
                     maskIsZero, 
@@ -579,6 +596,7 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
             assert(CHECK_POINTER_ARITHMETIC);
             assert(CHECK_ESCAPE_SITES); // should never elide deref checking on deref sites
             ASSERT_ELSE_UNKOWN(!checkInfo->isRangeCheck(), checkInfo->pointerOperand); // our typical range check poisoning approach wouldnt work here
+            assert(!COUNT_NOOB_FAILURES);
 
             auto radix = basePtrInfo.radix;
 
