@@ -12,16 +12,26 @@ def plot_results_from_csv(csv_filename):
     
     # Store which values have stars before converting
     stars = {}
-    for col in ['baseline', 'N00B', 'N00Balloc', 'LowFat']:
+    cols_check = ['baseline', 'N00B', 'N00Balloc']
+    if 'LowFat' in df.columns:
+        cols_check.append('LowFat')
+        
+    for col in cols_check:
         stars[col] = df[col].astype(str).str.contains('\*')
         # Remove stars and convert comma decimals before converting to float
         df[col] = pd.to_numeric(df[col].astype(str).str.replace('*', '').str.replace(',', '.'), errors='coerce')
+
+    # Check if LowFat has any valid data
+    has_lowfat = 'LowFat' in df.columns and df['LowFat'].notna().any()
 
     # Calculate ratios
     df['virtual_baseline'] = df[['baseline', 'N00Balloc']].min(axis=1)
     df['N00B_ratio'] = df['N00B'] / df['virtual_baseline']
     df['N00Balloc_ratio'] = df['N00Balloc'] / df['baseline']
-    df['LowFat_ratio'] = df['LowFat'] / df['virtual_baseline']  # Add LowFat ratio
+    if has_lowfat:
+        df['LowFat_ratio'] = df['LowFat'] / df['virtual_baseline']  # Add LowFat ratio
+    else:
+        df['LowFat_ratio'] = np.nan
 
     # Split into separate dataframes
     df_2006 = df[~df.iloc[:, 0].str.contains('_s|SPECspeed', na=False)].copy()  # No _s suffix and not the header
@@ -30,17 +40,26 @@ def plot_results_from_csv(csv_filename):
     # Calculate geometric means for each suite
     geomean_2006_N00B = np.exp(np.mean(np.log(df_2006['N00B_ratio'].dropna())))
     geomean_2006_N00Balloc = np.exp(np.mean(np.log(df_2006['N00Balloc_ratio'].dropna())))
-    geomean_2006_LowFat = np.exp(np.mean(np.log(df_2006['LowFat_ratio'].dropna())))  # Add LowFat geomean
+    if has_lowfat:
+        geomean_2006_LowFat = np.exp(np.mean(np.log(df_2006['LowFat_ratio'].dropna())))  # Add LowFat geomean
+    else:
+        geomean_2006_LowFat = np.nan
     
     geomean_2017_N00B = np.exp(np.mean(np.log(df_2017['N00B_ratio'].dropna())))
     geomean_2017_N00Balloc = np.exp(np.mean(np.log(df_2017['N00Balloc_ratio'].dropna())))
-    geomean_2017_LowFat = np.exp(np.mean(np.log(df_2017['LowFat_ratio'].dropna())))  # Add LowFat geomean
+    if has_lowfat:
+        geomean_2017_LowFat = np.exp(np.mean(np.log(df_2017['LowFat_ratio'].dropna())))  # Add LowFat geomean
+    else:
+        geomean_2017_LowFat = np.nan
     
     # Calculate overall geometric mean
     df_all = pd.concat([df_2006, df_2017])
     geomean_N00B = np.exp(np.mean(np.log(df_all['N00B_ratio'].dropna())))
     geomean_N00Balloc = np.exp(np.mean(np.log(df_all['N00Balloc_ratio'].dropna())))
-    geomean_LowFat = np.exp(np.mean(np.log(df_all['LowFat_ratio'].dropna())))  # Add LowFat geomean
+    if has_lowfat:
+        geomean_LowFat = np.exp(np.mean(np.log(df_all['LowFat_ratio'].dropna())))  # Add LowFat geomean
+    else:
+        geomean_LowFat = np.nan
 
     # Create result dataframe in desired order
     result_rows = []
@@ -109,19 +128,31 @@ def plot_results_from_csv(csv_filename):
     plt.figure(figsize=(17, 3))
 
     x = np.arange(len(df))
-    width = 0.25  # Reduced width to fit three bars
-    spacing = 0.02  # Additional offset between bars
+    # Check if LowFat ratio has any non-NaN data
+    has_lowfat = df['LowFat_ratio'].notna().any()
 
-    # Create bars with colorblind-friendly colors AND hatches
-    bars1 = plt.bar(x - width - spacing, df['N00Balloc_ratio'], width, 
-                    label='N00Balloc', 
-                    color='#004488')  # dark blue
-    bars2 = plt.bar(x, df['LowFat_ratio'], width,
-                    label='Low-Fat equivalent',
-                    color='#009988')  # teal
-    bars3 = plt.bar(x + width + spacing, df['N00B_ratio'], width, 
-                    label='N00B', 
-                    color='#EE7733')  # dark orange
+    if has_lowfat:
+        width = 0.25  # Reduced width to fit three bars
+        spacing = 0.02  # Additional offset between bars
+        # Create bars with colorblind-friendly colors AND hatches
+        bars1 = plt.bar(x - width - spacing, df['N00Balloc_ratio'], width, 
+                        label='N00Balloc', 
+                        color='#004488')  # dark blue
+        bars2 = plt.bar(x, df['LowFat_ratio'], width,
+                        label='Low-Fat equivalent',
+                        color='#009988')  # teal
+        bars3 = plt.bar(x + width + spacing, df['N00B_ratio'], width, 
+                        label='N00B', 
+                        color='#EE7733')  # dark orange
+    else:
+        width = 0.35  # Wider bars for 2-bar layout
+        spacing = 0.02
+        bars1 = plt.bar(x - width/2 - spacing/2, df['N00Balloc_ratio'], width, 
+                        label='N00Balloc', 
+                        color='#004488')  # dark blue
+        bars3 = plt.bar(x + width/2 + spacing/2, df['N00B_ratio'], width, 
+                        label='N00B', 
+                        color='#EE7733')  # dark orange
 
     # Set x-axis limits with a bit more padding
     plt.xlim(-0.75, len(df) - 0.25)  # Changed from -0.5 and -0.5 to add more space
@@ -147,7 +178,8 @@ def plot_results_from_csv(csv_filename):
 
     # Add bar labels in the same order with corresponding column names
     autolabel(bars1, df['N00Balloc_ratio'], 'N00Balloc')
-    autolabel(bars2, df['LowFat_ratio'], 'LowFat')
+    if has_lowfat:
+        autolabel(bars2, df['LowFat_ratio'], 'LowFat')
     autolabel(bars3, df['N00B_ratio'], 'N00B')
 
 
@@ -171,8 +203,12 @@ def plot_results_from_csv(csv_filename):
     plt.axhline(y=1.5, color='red', linestyle='--', alpha=0.3)  # Removed label parameter
 
     # Adjust y-axis to leave proportional space at top and bottom
-    ymax = max(df['N00B_ratio'].max(), df['N00Balloc_ratio'].max(), df['LowFat_ratio'].max())
-    ymin = min(df['N00B_ratio'].min(), df['N00Balloc_ratio'].min(), df['LowFat_ratio'].min())
+    if has_lowfat:
+        ymax = max(df['N00B_ratio'].max(), df['N00Balloc_ratio'].max(), df['LowFat_ratio'].max())
+        ymin = min(df['N00B_ratio'].min(), df['N00Balloc_ratio'].min(), df['LowFat_ratio'].min())
+    else:
+        ymax = max(df['N00B_ratio'].max(), df['N00Balloc_ratio'].max())
+        ymin = min(df['N00B_ratio'].min(), df['N00Balloc_ratio'].min())
     bottom_line = ymin * 0.95
     
     # Calculate space needed for bar labels
