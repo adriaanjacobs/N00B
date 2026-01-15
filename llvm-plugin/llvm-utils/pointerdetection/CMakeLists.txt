@@ -1,0 +1,2 @@
+add_library(ptrdetectionpass SHARED pointerdetector.cpp sillyperlanalysis.cpp pointerqueries.cpp)
+target_link_libraries(ptrdetectionpass util)

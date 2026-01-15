@@ -21,7 +21,8 @@
 !llvm-plugin/
 !llvm-plugin/**/
 
-!n00bloader
+!n00bloader/
+!n00bloader/**/
 
 !patches/
 !patches/**/
