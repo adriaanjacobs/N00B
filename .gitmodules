@@ -6,4 +6,4 @@
 	url = https://github.com/vaivaswatha/debugir.git
 [submodule "n00bloader"]
 	path = n00bloader
-	url = git@github.com:adriaanjacobs/n00bloader.git
+	url = ../n00bloader
