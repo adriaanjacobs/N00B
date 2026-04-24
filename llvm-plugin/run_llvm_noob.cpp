@@ -58,7 +58,8 @@ int main(int argc, char* argv[]) {
     PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
 
     // Register our own analyses
-    MemAccessInstrumentator::registerAnalyses(MAM);
+    NOOBInstrumentationPass::registerModuleAnalyses(MAM);
+    NOOBInstrumentationPass::registerFunctionAnalyses(FAM);
 
     // add passes in the order you want them to run
     llvm::ModulePassManager MPM;

@@ -27,7 +27,12 @@
 // find all the globals we want to wrap, compute their radix, and set the minimum alignment
 // std::map so we get it nice and ordered
 std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> NOOBInstrumentationPass::findUnsafeGlobals(llvm::Module& module, llvm::ModuleAnalysisManager& MAM) {
-    auto& unsafeAccessInfo = MAM.getResult<UnsafeAccessFinderAnalysis>(module).getOrCreate(false);
+#if INTRAPROCEDURAL_ONLY
+    auto unsafeAccesses = findUnsafeAccesses(module, MAM);
+#else
+    auto& unsafeAccesses = MAM.getResult<UnsafeAccessFinderAnalysis>(module).getOrCreate(false).unsafeAccesses;
+#endif
+
     auto& callSiteAnalysis = MAM.getResult<CallSiteAnalysis>(module);
     std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> radixToGlobals;
     size_t numSafeGlobals = 0;
@@ -35,7 +40,7 @@ std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> NOOBInstrumentation
         // globals that cannot flow into unsafeaccesses should be left alone
         //  this helps deal with opaque/llvm-inserted globals that have special section info etc.
         //  e.g. @llvm.used
-        if (!ptrMayReachUnsafeAccesses(&global, unsafeAccessInfo, callSiteAnalysis)) {
+        if (!ptrMayReachUnsafeAccesses(&global, unsafeAccesses, false, callSiteAnalysis)) {
             numSafeGlobals++;
             continue;
         }
@@ -123,6 +128,29 @@ void NOOBInstrumentationPass::extendNOOBLinkerScript(std::string& noobLinkerScri
     noobLinkerScript.append(sections.str());
 }
 
+llvm::DenseSet<llvm::Instruction*> NOOBInstrumentationPass::findUnsafeAccesses(llvm::Module& module, llvm::ModuleAnalysisManager& MAM) {
+    llvm::DenseSet<llvm::Instruction*> unsafeAccesses;
+    
+    for (auto& func : module) {
+        if (func.isDeclaration())
+            continue;
+
+        auto OSOV = getFAM(module, MAM).getResult<OSOVAnalysis>(func);
+
+        for (auto& bb : func) {
+            for (auto& inst : bb) {
+                if (auto ptrUse = getLoadStorePointerOperandUse(&inst)) {
+                    if (!OSOV.isInBounds(ptrUse)) {
+                        unsafeAccesses.insert(&inst);
+                    }
+                }
+            }
+        }
+    }
+
+    return unsafeAccesses;
+}
+
 bool belongsToUnsafeModule(llvm::Function* function) {
     auto selectModule = getenv("NOOB_SELECT");
     if (!selectModule)
@@ -143,9 +171,13 @@ bool belongsToUnsafeModule(llvm::Function* function) {
 //      2. arithmetic checks: verify that pointer arithmetic does not modify any of the more significant bits, 
 //          so that in-pointer tags cannot repeat, radix info/top tag is not corrupted, etc.
 llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::createInstrumentationPlans(llvm::Module& module, llvm::ModuleAnalysisManager& MAM) {
-    auto& unsafeAccessInfo = MAM.getResult<UnsafeAccessFinderAnalysis>(module).getOrCreate(false);
+#if INTRAPROCEDURAL_ONLY
+    auto unsafeAccesses = findUnsafeAccesses(module, MAM);
+#else
+    auto& unsafeAccesses = MAM.getResult<UnsafeAccessFinderAnalysis>(module).getOrCreate(false).unsafeAccesses;
     MAM.getCachedResult<IsInBoundsAnalysis>(module)->printBailStats();
-    auto& pointerInfo = MAM.getResult<PointerDetectionAnalysis>(module);
+    auto pointerInfo = &MAM.getResult<PointerDetectionAnalysis>(module);
+#endif
 
     // we're going to optimize the placement of checks in two waves: once for arithmetic checks & once for dereference checks
     //  this is because the hoisting code assumes that all checks can cancel each other out
@@ -160,7 +192,7 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
         return reinterpret_cast<CheckInfo*>(point);
     };
 
-    for (auto& access : unsafeAccessInfo.unsafeAccesses) {
+    for (auto& access : unsafeAccesses) {
         if (!belongsToUnsafeModule(access->getFunction()))
             continue;
 
@@ -186,10 +218,14 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
     }
 
     if (auto selectedModule = getenv("NOOB_SELECT"))
-        llvm::errs() << "NOOB_SELECT=" << selectedModule << " resulted in " << dbg_checkInfos.size() << "/" << unsafeAccessInfo.unsafeAccesses.size() << " (" << 100.0f*dbg_checkInfos.size()/(float)unsafeAccessInfo.unsafeAccesses.size() << "%) unsafe memaccess instrumented\n";
+        llvm::errs() << "NOOB_SELECT=" << selectedModule << " resulted in " << dbg_checkInfos.size() << "/" << unsafeAccesses.size() << " (" << 100.0f*dbg_checkInfos.size()/(float)unsafeAccesses.size() << "%) unsafe memaccess instrumented\n";
 
     LoopHoister loopHoister{module, MAM};
-    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, !EMIT_RUNTIME_CALLS && !EMULATE_LOWFAT && !COUNT_NOOB_FAILURES);
+    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, !EMIT_RUNTIME_CALLS && !EMULATE_LOWFAT && !COUNT_NOOB_FAILURES
+#if not INTRAPROCEDURAL_ONLY
+        , &pointerInfo
+#endif
+    );
     // lowfat and runtime debug cannot handle non-postdom
     // neither can our masked ptr counting
 
@@ -207,13 +243,16 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
             checkInfoToUses[checkInfo].insert(memaccessUse);
         }
 
-    auto& isInBoundsAnalysis = MAM.getResult<IsInBoundsAnalysis>(module);
     // add escape sites too, only for unsafe pointers
 
 #if SOUND_POINTER_DETECTION
+    auto& isInBoundsAnalysis = MAM.getResult<IsInBoundsAnalysis>(module);
     for (auto& pointer : pointerInfo.pointers) {
         ASSERT_ELSE_UNKOWN(pointerInfo.is_confirmed_pointer(pointer), pointer);
 #else
+#if not INTRAPROCEDURAL_ONLY
+    auto& isInBoundsAnalysis = MAM.getResult<IsInBoundsAnalysis>(module);    
+#endif
     for (auto& func : module)
         for (auto& inst : llvm::instructions(func))
             if (auto pointer = llvm::dyn_cast<llvm::GetElementPtrInst>(&inst)) {
@@ -222,11 +261,19 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
         if (llvm::isa<llvm::Constant>(pointer))
             continue;
 
+#if INTRAPROCEDURAL_ONLY
+        auto& isInBoundsAnalysis = getFAM(module, MAM).getResult<OSOVAnalysis>(func);
+#endif
+
         llvm::DenseSet<llvm::Use*> escapeSites;
-        collectIntraProceduralPtrEscapes(pointer, escapeSites, pointerInfo);
+        collectIntraProceduralPtrEscapes(pointer, escapeSites
+#if not INTRAPROCEDURAL_ONLY
+            , &pointerInfo
+#endif
+        );
         for (auto* use : escapeSites) {
             // if the escaping pointer is in bounds, nothing to do
-            if (isInBoundsAnalysis.isInBounds(use->get()))
+            if (isInBoundsAnalysis.isInBounds(use))
                 continue;
             
             auto user = use->getUser();
@@ -262,7 +309,11 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
 
     // then optimize the list _again_. the loophoister will share expanded SCEVs for both i think
     //  the advantage is that this will eliminate dominated arithmetic checks and such
-    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, false); // non-wrapping escape instrumentation is always branching
+    loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, false
+#if not INTRAPROCEDURAL_ONLY
+        , &pointerInfo
+#endif
+    ); // non-wrapping escape instrumentation is always branching
 
     { // sanitize: check that this second hoisting step did not modify any of the points that also describe dereferences
         // otherwise, the introduction of new points is changing the location of existing points? this may happen in the future
@@ -282,7 +333,15 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
     //      and if it grows and it's still present, all uses must receive arithchecks
     // we borrow cuCatch/CGuard's trick to propagate base pointers from source through selects/phis
     //  this is implemented in "BasePtrTracker" and modifies the module
-    BasePtrTracker basePtrTracker{module, MAM};
+    BasePtrTracker basePtrTracker {
+        [&] (llvm::Value* ptr) -> BasePtrInfo {
+#if INTRAPROCEDURAL_ONLY
+            return PointerDetector::find_simple_base_pointer(ptr);
+#else
+            return pointerInfo.find_real_base(ptr);
+#endif
+        }
+    };
     for (auto& [func, instpoints] : funcToCheckPoints) {
         for (auto& [memaccessUse, point] : instpoints) {
             auto checkInfo = safeDownCast(point);
@@ -343,7 +402,7 @@ llvm::Value* NOOBInstrumentationPass::computeTopTag(llvm::Value* ptr, llvm::Valu
     return llvm::BinaryOperator::CreateLShr(ptrAsInt, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, NOOB_TOPTAG_START}), "toptag", insertBefore);
 }
 
-llvm::Value* NOOBInstrumentationPass::computePoisonMaskAtDerefSite(const CheckInfo& checkInfo, const BasePtrInfo& basePtrInfo, llvm::Instruction* insertBefore) {
+llvm::Value* NOOBInstrumentationPass::computePoisonMaskAtDerefSite(const CheckInfo& checkInfo, const ComputedBasePtrInfo& basePtrInfo, llvm::Instruction* insertBefore) {
     auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
     // FIXME: "mbedtls_md5_starts_ret" in benchmark.ll has an example at the top of an unnecessary arith check. why do we have it??
     assert(checkInfo.shouldCheckDereference()); // this function assumes we're at a deref site, for poisoning
@@ -449,7 +508,7 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
     llvm::DenseMap<llvm::Value*, llvm::DenseMap<llvm::Function*, llvm::DenseSet<CheckInfo*>>> trackedBaseToCheckInfos;
     for (auto& [checkInfo, usesToReplace] : checkInfoToUses) 
         trackedBaseToCheckInfos[checkInfo->trackedBase][checkInfo->insertBefore->getFunction()].insert(checkInfo);
-    llvm::DenseMap<llvm::Value* /* trackedBase */, llvm::DenseMap<llvm::Function*, BasePtrInfo>> baseToBasePtrInfo;
+    llvm::DenseMap<llvm::Value* /* trackedBase */, llvm::DenseMap<llvm::Function*, ComputedBasePtrInfo>> baseToBasePtrInfo;
     for (auto& [trackedBase, funcToCheckInfos] : trackedBaseToCheckInfos) {
         for (auto& [func, checkInfos] : funcToCheckInfos) {
             auto& domTree = getFAM(module, MAM).getResult<llvm::DominatorTreeAnalysis>(*func);
@@ -780,9 +839,11 @@ void NOOBInstrumentationPass::maskExternalPointerArguments(llvm::Module& module)
                                 }
 }
 
-llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm::ModuleAnalysisManager& MAM) { 
+llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm::ModuleAnalysisManager& MAM) {
+#if REMAP_GLOBALS
     // find unsafe globals up front, before modification
     const auto radixToGlobals = findUnsafeGlobals(module, MAM);
+#endif
     // also find unsafe allocas up front
     const auto unsafeAllocas = findUnsafeAllocas(module, MAM);
 
@@ -835,8 +896,12 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
 }
 
 
-void NOOBInstrumentationPass::registerAnalyses(llvm::ModuleAnalysisManager& MAM) {
+void NOOBInstrumentationPass::registerModuleAnalyses(llvm::ModuleAnalysisManager& MAM) {
     MemAccessInstrumentator::registerAnalyses(MAM);
+}
+
+void NOOBInstrumentationPass::registerFunctionAnalyses(llvm::FunctionAnalysisManager& FAM) {
+    FAM.registerPass([] { return OSOVAnalysis{}; });
 }
 
 std::error_code ec;

@@ -12,7 +12,8 @@ extern "C" ::llvm::PassPluginLibraryInfo LLVM_ATTRIBUTE_WEAK llvmGetPassPluginIn
                 llvm::outs() << "Registering NOOB pass for LateLTO!\n";
                 NOOBInstrumentationPass::addPasses(MPM);
             });
-            PB.registerAnalysisRegistrationCallback(NOOBInstrumentationPass::registerAnalyses);
+            PB.registerAnalysisRegistrationCallback(NOOBInstrumentationPass::registerModuleAnalyses);
+            PB.registerAnalysisRegistrationCallback(NOOBInstrumentationPass::registerFunctionAnalyses);
         }
     };
 }

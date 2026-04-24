@@ -37,6 +37,8 @@ class NOOBInstrumentationPass : public llvm::PassInfoMixin<NOOBInstrumentationPa
     std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> findUnsafeGlobals(llvm::Module&, llvm::ModuleAnalysisManager& MAM);
     void extendNOOBLinkerScript(std::string& noobLinkerScript, const std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>>& radixToGlobals);
 
+    llvm::DenseSet<llvm::Instruction*> findUnsafeAccesses(llvm::Module& module, llvm::ModuleAnalysisManager& MAM);
+
     llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> createInstrumentationPlans(llvm::Module& module, llvm::ModuleAnalysisManager& MAM);
     void applyNOOBChecks(llvm::Module& module, llvm::ModuleAnalysisManager& MAM, const llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>>& checkInfoToUses);
 
@@ -45,7 +47,7 @@ class NOOBInstrumentationPass : public llvm::PassInfoMixin<NOOBInstrumentationPa
 
     void maskExternalPointerArguments(llvm::Module& module);
 
-    struct BasePtrInfo {
+    struct ComputedBasePtrInfo {
         llvm::Value* radix;
         llvm::Value* origObj;
         llvm::Value* topTag;
@@ -54,7 +56,7 @@ class NOOBInstrumentationPass : public llvm::PassInfoMixin<NOOBInstrumentationPa
     llvm::Value* shiftDownTillInPointerTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore);
     llvm::Value* embedInPointerTagAsTopTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore);
     llvm::Value* computeTopTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore);
-    llvm::Value* computePoisonMaskAtDerefSite(const CheckInfo& checkInfo, const BasePtrInfo& basePtrInfo, llvm::Instruction* insertBefore);
+    llvm::Value* computePoisonMaskAtDerefSite(const CheckInfo& checkInfo, const ComputedBasePtrInfo& basePtrInfo, llvm::Instruction* insertBefore);
 
 public:
     explicit NOOBInstrumentationPass() = default;
@@ -63,7 +65,8 @@ public:
     // Transform the bitcode/IR in the given LLVM module.
     llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM);
 
-    static void registerAnalyses(llvm::ModuleAnalysisManager&);
+    static void registerModuleAnalyses(llvm::ModuleAnalysisManager&);
+    static void registerFunctionAnalyses(llvm::FunctionAnalysisManager&);
     static void addPasses(llvm::ModulePassManager&);
 };
 
@@ -73,20 +76,4 @@ struct RadixDecoder {
 
     RadixDecoder(llvm::Module& module);
     llvm::Value* computeRadix(llvm::Value* ptrAsInt, llvm::Instruction* insertBefore);
-};
-
-struct BasePtrTracker {
-    llvm::Module& module;
-    llvm::ModuleAnalysisManager& MAM;
-    struct BasePtrTrackerInfo {
-        llvm::Value* baseTracker;
-        std::optional<bool> isModified;
-    };
-    llvm::DenseMap<llvm::Value*, BasePtrTrackerInfo> cachedTrackers;
-
-    BasePtrTracker(llvm::Module& module, llvm::ModuleAnalysisManager& MAM);
-
-    // propagates intraprocedural base pointers (arguments, loads, calls, ...) through merges (select, phi) 
-    // and returns a variable representing the value of the base pointer when `ptr` is live
-    BasePtrTrackerInfo trackBasePtr(llvm::Value* ptr);
 };
