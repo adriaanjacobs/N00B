@@ -25,7 +25,6 @@ add_subdirectory(llvm-utils/)
 # The below part can be moved into its own subdirectory if you want (I typically do it like that)
 add_library(llvmnoob SHARED 
     llvm_noob.cpp 
-    track_base_ptr.cpp
     radix_decoder.cpp
     llvm_noob_plugin.cpp
 )
