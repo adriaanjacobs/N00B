@@ -613,14 +613,27 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
                 assert(!replacedUses.contains(*usesToReplace.begin()));
                 // it's possible that there are multiple usesToReplace for a range check. 
                 //  i've found a case in SPEC17 x264_s where loop-invariant & loop-variant memory accesses all used the same check
-                //  in that case, we replace all the uses. We just enforce here (for simplicity) that they all share the same pointeroperand. 
-                //  which is the case for x264_s :)
-                auto pointerOperand = [&usesToReplace = usesToReplace] () -> llvm::Value* {
+                //  in that case, we replace all the uses. 
+                //  We need to pick a single pointeroperand here for all of them. 
+                //    We assert that all of them really are the same pointer (this may be a weaker check than the hoisting implementation)
+                //    And if they are not all the same Value, we pick the one that dominates the others. 
+                auto pointerOperand = [&, &usesToReplace = usesToReplace] () -> llvm::Value* {
                     llvm::DenseSet<llvm::Value*> ptrOperands;
-                    for (auto use : usesToReplace)
-                        ptrOperands.insert(use->get());
-                    assert(ptrOperands.size() == 1);
-                    return *ptrOperands.begin();
+
+                    auto currentOperand = (*usesToReplace.begin())->get();
+                    llvm::DominatorTree* domTree = nullptr;
+                    if (usesToReplace.size() > 1)
+                        domTree = &getFAM(module, MAM).getResult<llvm::DominatorTreeAnalysis>(*insertBefore->getFunction());
+
+                    for (auto use : usesToReplace) {
+                        ASSERT_ELSE_UNKOWN(use->get()->stripPointerCastsForAliasAnalysis() == currentOperand->stripPointerCastsForAliasAnalysis(), currentOperand);
+                        if (use->get() != currentOperand) 
+                            // if this use dominates the others, use it as the pointeroperand
+                            if (auto inst = llvm::dyn_cast<llvm::Instruction>(currentOperand)) 
+                                if (domTree->dominates(use->get(), inst))
+                                    currentOperand = use->get();
+                    }                        
+                    return currentOperand;
                 } ();
                 checkInfo->pointerOperand = pointerOperand;
             }
