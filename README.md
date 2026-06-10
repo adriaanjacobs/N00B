@@ -1,4 +1,4 @@
-# The **N00B** Bounds Checker
+# The N00B Bounds Checker
 
 This repo contains the compiler passes & runtime code necessary to harden applications with the N00B bounds checker. Clone it to get started:
 ```bash
@@ -10,7 +10,7 @@ git submodule update
 ```
 
 ## Citation
-`N00B` started as a research project published at ACM CCS'26. Please use the following BibTex entry to cite it:
+N00B started as a research project published at ACM CCS'26. Please use the following BibTex entry to cite it:
 ```bibtex
 @inproceedings{jacobs2026n00b,
 author = {Jacobs, Adriaan and Ramponi, Carlo and Roels, Jonas and Crispo, Bruno and Vlasceanu, Silviu and Ammar, Mahmoud and Volckaert, Stijn},
@@ -46,7 +46,7 @@ If you manually installed LLVM to a non-standard location, you can set the `LLVM
 ## Hardening code with N00B
 For implementation reasons, N00B currently only supports whole-program IR during Link Time Optimization. There are two main ways to achieve this. 
 
-> _**NOTE**_: We are working to eliminate this unnecessary LTO requirement, and already provide alternatives for most most whole-program analyses in `N00B`. Reach out if you are interested in this! 
+> _**NOTE**_: We are working to eliminate this unnecessary LTO requirement, and already provide alternatives for most most whole-program analyses in N00B. Reach out if you are interested in this! 
 
 ### (Recommended) Single-step process: integrate with build system (noobclang)
 Use Link Time Optimization and integrate NOOB with the build settings of the project. 
@@ -60,7 +60,7 @@ CXX=${NOOB_DIR}/build/noobclang++
 
 > _**NOTE**_: The script simply looks for a `-c` command line option to figure out whether it's being called at compile or link time. This is a very stupid heuristic, but works so far on all projects we have tested. If you encounter weird problems, it is likely due to this. Let us know!
 
-If you want to test just the impact of `N00B`'s allocator, we also provide similar `nooballocclang(++)` scripts. These do not instrument the program, but only link in the runtime support. 
+If you want to test just the impact of N00B's allocator, we also provide similar `nooballocclang(++)` scripts. These do not instrument the program, but only link in the runtime support. 
 
 ### (Manual) Two-step process: generate IR code first, then harden & compile down
 With [WLLVM](https://github.com/travitch/whole-program-llvm) or [GLLVM](https://github.com/SRI-CSL/gllvm), you can generate the whole-program IR for software projects. Afterwards, use the `run_llvm_noob` executable to modify the IR. Finally, link in the N00B runtime.
