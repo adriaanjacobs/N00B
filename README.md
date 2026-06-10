@@ -9,6 +9,18 @@ git submodule init
 git submodule update
 ```
 
+## Citation
+`N00B` started as a research project published at ACM CCS'26. Please use the following BibTex entry to cite it:
+```bibtex
+@inproceedings{jacobs2026n00b,
+author = {Jacobs, Adriaan and Ramponi, Carlo and Roels, Jonas and Crispo, Bruno and Vlasceanu, Silviu and Ammar, Mahmoud and Volckaert, Stijn},
+title = {{N00B}: Bounds Checking for the Masses},
+year = {2026},
+booktitle = {Proceedings of the 33rd ACM Conference on Computer and Communications Security (CCS'26)},
+note = {To appear.}
+}
+```
+
 ## Building
 N00B is made up of out-of-tree compiler passes for LLVM 15. For Ubuntu 20.04 and 22.04 you can grab pre-built LLVM libraries from [LLVM's apt repositories](https://apt.llvm.org/). General instructions like so:
 ```bash
