@@ -67,7 +67,7 @@ With [WLLVM](https://github.com/travitch/whole-program-llvm) or [GLLVM](https://
 ```bash
 # build project with gllvm
 get-bc <exe name>                                   # get bitcode with gllvm
-build/llvm-plugin/run_llvm_noob ir.ll ir.noob.ll    # modify IR to insert bounds checks
+${NOOB_DIR}/build/llvm-plugin/run_llvm_noob ir.ll ir.noob.ll    # modify IR to insert bounds checks
 clang-15 ir.noob.ll \
         -fuse-ld=/usr/bin/ld.lld-15 -Xclang -no-opaque-pointers \
         -Wl,-rpath=${NOOB_DIR}/build/allocator/ ${NOOB_DIR}/build/allocator/libnooballoc.so \
@@ -83,7 +83,7 @@ ${NOOB_DIR}/build/noobclang test.[c/cpp/ll] -o test
 ```
 
 ### Benchmarking
-We generate SPEC CPU2006 (`<build>/templates/spec06/`) and SPEC CPU2017 (`<build>/templates/spec17/`) configs for benchmarking N00B: 
+We generate SPEC CPU2006 (`${NOOB_DIR}/<build>/templates/spec06/`) and SPEC CPU2017 (`${NOOB_DIR}/<build>/templates/spec17/`) configs for benchmarking N00B: 
 * `clang15-lto-baseline.cfg` runs without any N00B changes, but with the same compiler and optimization options.
 * `clang15-lto-nooballoc.cfg` measures the impact of N00B's memory layout requirements, with `nooballoc` linked into the binaries, and `n00bloader` to place them above `NOOB_MAX_ADDR`.  
 * `clang15-lto-noob.cfg` runs with full N00B hardening enabled. 
