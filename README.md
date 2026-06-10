@@ -26,16 +26,31 @@ Then, run `cmake` from a build directory to build N00B.
 ```bash
 mkdir build
 cd build
-cmake ../ # Optional: -DLLVM_DIR=/usr/lib/llvm-15/lib/cmake/ -DClang_DIR=/usr/lib/llvm-15/lib/cmake/clang/
+cmake ../ -DLLVM_DIR=/usr/lib/llvm-15/lib/cmake/ -DClang_DIR=/usr/lib/llvm-15/lib/cmake/clang/
 make -j
 ```
 If you manually installed LLVM to a non-standard location, you can set the `LLVM_DIR` CMake variable to the `cmake/llvm` folder of your installation (containing `LLVMConfig.cmake`, `find <folder> -name "LLVMConfig.cmake"`). Same for `Clang_DIR`. 
 
-
 ## Hardening code with N00B
-N00B expects whole-program LLVM IR code to perform its analyses and transformations. There are two main ways to do this.
+For implementation reasons, N00B currently only supports whole-program IR during Link Time Optimization. There are two main ways to achieve this. 
 
-### Two-step process: generate IR code first, then harden & compile down
+> _**NOTE**_: We are working to eliminate this unnecessary LTO requirement, and already provide alternatives for most most whole-program analyses in `N00B`. Reach out if you are interested in this! 
+
+### (Recommended) Single-step process: integrate with build system (noobclang)
+Use Link Time Optimization and integrate NOOB with the build settings of the project. 
+
+We generate (best effort!) drop-in clang(++) replacer scripts called `noobclang(++)`, which apply the right flags during compilation and linking. 
+You can simply specify `noobclang` as the project's compiler at configuration or build time. This will work for most projects, most of the time. 
+```bash
+CC=${NOOB_DIR}/build/noobclang 
+CXX=${NOOB_DIR}/build/noobclang++
+```
+
+> _**NOTE**_: The script simply looks for a `-c` command line option to figure out whether it's being called at compile or link time. This is a very stupid heuristic, but works so far on all projects we have tested. If you encounter weird problems, it is likely due to this. Let us know!
+
+If you want to test just the impact of `N00B`'s allocator, we also provide similar `nooballocclang(++)` scripts. These do not instrument the program, but only link in the runtime support. 
+
+### (Manual) Two-step process: generate IR code first, then harden & compile down
 With [WLLVM](https://github.com/travitch/whole-program-llvm) or [GLLVM](https://github.com/SRI-CSL/gllvm), you can generate the whole-program IR for software projects. Afterwards, use the `run_llvm_noob` executable to modify the IR. Finally, link in the N00B runtime.
 ```bash
 # build project with gllvm
@@ -44,22 +59,15 @@ build/llvm-plugin/run_llvm_noob ir.ll ir.noob.ll    # modify IR to insert bounds
 clang-15 ir.noob.ll \
         -fuse-ld=/usr/bin/ld.lld-15 -Xclang -no-opaque-pointers \
         -Wl,-rpath=${NOOB_DIR}/build/allocator/ ${NOOB_DIR}/build/allocator/libnooballoc.so \
-        -Wl,-dynamic-linker,${NOOB_DIR}/n00bloader/n00bloader
+        -Wl,-dynamic-linker,${NOOB_DIR}/n00bloader/n00bloader \
+        -o ir.noob
 ./ir.noob <args>
 ```
 
-For convenience, N00B generates a `noobclang` and `noobclang++` script in the root of the build folder that accepts C/C++/IR code and passes these options already. 
-
-### Single-step process: integrate with build system (noobclang)
-Another way to handle all of this at once is to use Link Time Optimization and integrate NOOB with the build settings of the project. 
-
-This means passing `-flto -Xclang -no-opaque-pointers` to `CFLAGS` and using `noobclang` or `noobclang++` as `C(XX)LD`. Here are the relevant settings for SPEC CPU2006 that we use:
+This is mostly useful for testing small files or debugging the compiler given an IR dump. 
+For convenience, you can also use `noobclang(++)` on C/C++/IR files, like a regular compiler, which simplifies such testing. Use as follows:
 ```bash
-CC           = clang-15 -Xclang -no-opaque-pointers -flto 
-CLD          = ${NOOB_DIR}/build/noobclang 
-CXX          = clang++-15 -Xclang -no-opaque-pointers -flto 
-CXXLD        = ${NOOB_DIR}/build/noobclang++ 
-FC           = we-do-not-support-fortran
+${NOOB_DIR}/build/noobclang test.[c/cpp/ll] -o test
 ```
 
 ### Benchmarking
