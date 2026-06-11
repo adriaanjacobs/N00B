@@ -167,6 +167,12 @@ def main():
         help="Update CSV file in the current working directory. Optionally specify a full filename (e.g. --csv=results.csv). Defaults to spec-results.csv if passed without value."
     )
     ap.add_argument(
+        "--name",
+        type=str,
+        default=None,
+        help="Custom name to use for display and CSV column headers. Defaults to config_name."
+    )
+    ap.add_argument(
         "--oob-stats",
         action="store_true",
         help="Report OOB stats from stderr instead of RSS/Runtime."
@@ -175,7 +181,9 @@ def main():
 
     results = collect_data(args.config_name, oob_stats=args.oob_stats)
     
-    print_table(results, args.config_name, BENCHMARKS, oob_stats=args.oob_stats)
+    display_name = args.name if args.name else args.config_name
+    
+    print_table(results, display_name, BENCHMARKS, oob_stats=args.oob_stats)
 
     if args.csv is not None:
         csv_name = args.csv if args.csv else "spec-results.csv"
@@ -183,10 +191,10 @@ def main():
         
         print(f"Updating CSV: {csv_name}")
 
-        col_names = [args.config_name, f"{args.config_name} peak RSS (MB)", f"{args.config_name} .text size (KB)"]
+        col_names = [display_name, f"{display_name} peak RSS (MB)", f"{display_name} .text size (KB)"]
 
         if check_csv_conflict(csv_file, col_names, BENCHMARKS, lambda k: [results[k]["rt"], results[k]["rss"], results[k]["text"]]):
-            ans = input(f"WARNING: {csv_name} already has data for '{args.config_name}' that would be overwritten. Proceed? [y/N]: ")
+            ans = input(f"WARNING: {csv_name} already has data for '{display_name}' that would be overwritten. Proceed? [y/N]: ")
             if ans.lower() != 'y':
                 print(f"Skipping update for {csv_name}.")
                 return
