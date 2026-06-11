@@ -19,6 +19,10 @@ configure_file(
 
 set(DEBUGIR_LLVM_VERSION 15)
 add_subdirectory(debugir/)
+# work around an apparent Clang 15 bug that does not handle newer GCC C++ stdlib well
+#   https://github.com/llvm/llvm-project/issues/52696
+set_target_properties(debugir PROPERTIES CXX_STANDARD 17)
+set_target_properties(dbgir PROPERTIES CXX_STANDARD 17)
 
 add_subdirectory(corolla/)
 

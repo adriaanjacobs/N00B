@@ -23,6 +23,7 @@
 #include <bitset>
 #include <map>
 #include <functional>
+#include <algorithm>
 
 #define ASSERT_ELSE_PERROR(cond) \
     do {                            \
