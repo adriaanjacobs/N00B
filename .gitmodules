@@ -1,9 +1,9 @@
 [submodule "llvm-plugin/llvm-utils"]
 	path = llvm-plugin/corolla
-	url = ../llvm-utils
+	url = https://github.com/adriaanjacobs/corolla.git
 [submodule "llvm-plugin/debugir"]
 	path = llvm-plugin/debugir
 	url = https://github.com/vaivaswatha/debugir.git
 [submodule "n00bloader"]
 	path = n00bloader
-	url = ../n00bloader
+	url = https://github.com/adriaanjacobs/n00bloader.git
