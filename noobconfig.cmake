@@ -55,9 +55,9 @@ set(CHECK_ESCAPE_SITES          ON)
 set(CHECK_POINTER_ARITHMETIC    ON)
 set(CHECK_POINTER_DEREFERENCES  ON)
 set(USE_BRANCHING_CHECKS        ON)
-set(INTRAPROCEDURAL_ONLY        ON)
+set(INTRAPROCEDURAL_ONLY        OFF)
 if (NOT INTRAPROCEDURAL_ONLY)
-    set(SOUND_POINTER_DETECTION OFF)     # Interprocedural analyses must be enabled to use sound pointer detection
+    set(SOUND_POINTER_DETECTION ON)     # Interprocedural analyses must be enabled to use sound pointer detection
 endif()
 
 set(MASK_EXT_PTR_ARGS           OFF)
