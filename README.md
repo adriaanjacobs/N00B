@@ -10,7 +10,7 @@ git submodule update
 ```
 
 ## Citation
-N00B started as a research project published at ACM CCS'26. Please use the following BibTex entry to cite it:
+N00B started as a research project published at [ACM CCS'26](https://www.sigsac.org/ccs/CCS2026/). Please use the following BibTex entry to cite it:
 ```bibtex
 @inproceedings{jacobs2026n00b,
 author = {Jacobs, Adriaan and Ramponi, Carlo and Roels, Jonas and Crispo, Bruno and Vlasceanu, Silviu and Ammar, Mahmoud and Volckaert, Stijn},
@@ -48,8 +48,8 @@ For implementation reasons, N00B currently only supports whole-program IR during
 
 > _**NOTE**_: We are working to eliminate this unnecessary LTO requirement, and already provide alternatives for most most whole-program analyses in N00B. Reach out if you are interested in this! 
 
-### (Recommended) Single-step process: integrate with build system (noobclang)
-Use Link Time Optimization and integrate NOOB with the build settings of the project. 
+### (Recommended) Single-step process: integrate with build system (`noobclang`)
+Use Link Time Optimization and integrate N00B with the build settings of the project. 
 
 We generate (best effort!) drop-in clang(++) replacer scripts called `noobclang(++)`, which apply the right flags during compilation and linking. 
 You can simply specify `noobclang` as the project's compiler at configuration or build time. This will work for most projects, most of the time. 

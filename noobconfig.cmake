@@ -26,8 +26,6 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)")
         set(NOOB_MIN_RADIX          0x4)
         # maximum 16GB allocations
         set(NON_NOOB_MIN_RADIX      35)
-        set(NOOB_IGNORE_ERRORS      OFF)
-        set(NOOB_TAG_POINTERS       ON)
     elseif(CPUINFO_RAW MATCHES "vendor_id\t: AuthenticAMD")
         message(STATUS "Host: AMD x86_64 (Detected AuthenticAMD)")
         set(TAG_WIDTH               7)
@@ -36,14 +34,15 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)")
         set(NOOB_MIN_RADIX          0x4)
         # maximum 16GB allocations
         set(NON_NOOB_MIN_RADIX      35)
-        set(NOOB_IGNORE_ERRORS      ON)
-        set(NOOB_TAG_POINTERS       OFF)
     else()
         message(FATAL_ERROR "Host: x86_64, but Vendor ID is unknown: ${HOST_PROC}")
     endif()
 else()
     message(FATAL_ERROR "Unsupported processor: ${CMAKE_SYSTEM_PROCESSOR}")
 endif()
+
+set(NOOB_IGNORE_ERRORS      OFF)
+set(NOOB_TAG_POINTERS       ON)
 
 math(EXPR NOOB_MAX_ADDR "(${NON_NOOB_MIN_RADIX}-${NOOB_MIN_RADIX})<<42" OUTPUT_FORMAT HEXADECIMAL)
 
