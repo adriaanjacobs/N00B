@@ -18,9 +18,30 @@ def generate_latex_table(csv_filename):
     """
     # --- 1. Load Data ---
     try:
-        # Load the CSV, skipping the problematic header.
-        col_names = ['benchmark', 'rss_base', 'rss_n00b', 'text_base', 'text_n00b']
-        df = pd.read_csv(csv_filename, header=None, skiprows=1, names=col_names)
+        df = pd.read_csv(csv_filename)
+        benchmark_col = df.columns[0]
+        
+        # Auto-detect columns based on substrings
+        rss_base_col = next((c for c in df.columns if 'baseline' in c.lower() and 'rss' in c.lower()), None)
+        rss_n00b_col = next((c for c in df.columns if ('n00b' in c.lower() or 'noob' in c.lower()) and 'rss' in c.lower()), None)
+        text_base_col = next((c for c in df.columns if 'baseline' in c.lower() and 'text' in c.lower()), None)
+        text_n00b_col = next((c for c in df.columns if ('n00b' in c.lower() or 'noob' in c.lower()) and 'text' in c.lower()), None)
+
+        if not all([rss_base_col, rss_n00b_col, text_base_col, text_n00b_col]):
+            print(f"FATAL: Could not auto-detect necessary columns in {csv_filename}")
+            print(f"Found columns: {df.columns.tolist()}")
+            return
+            
+        df = df.rename(columns={
+            benchmark_col: 'benchmark',
+            rss_base_col: 'rss_base',
+            rss_n00b_col: 'rss_n00b',
+            text_base_col: 'text_base',
+            text_n00b_col: 'text_n00b'
+        })
+        
+        df = df[['benchmark', 'rss_base', 'rss_n00b', 'text_base', 'text_n00b']]
+        
     except Exception as e:
         print(f"FATAL: Failed to load CSV. Error: {e}")
         return

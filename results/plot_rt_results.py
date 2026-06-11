@@ -10,6 +10,27 @@ def plot_results_from_csv(csv_filename):
     # Read the CSV file
     df = pd.read_csv(csv_filename)
     
+    # Auto-detect RT columns by searching for keywords, explicitly excluding 'rss' and 'text'
+    baseline_col = next((c for c in df.columns if 'baseline' in c.lower() and 'rss' not in c.lower() and 'text' not in c.lower()), None)
+    n00b_col = next((c for c in df.columns if ('n00b' in c.lower() or 'noob' in c.lower()) and 'alloc' not in c.lower() and 'rss' not in c.lower() and 'text' not in c.lower()), None)
+    n00balloc_col = next((c for c in df.columns if ('n00balloc' in c.lower() or 'nooballoc' in c.lower()) and 'rss' not in c.lower() and 'text' not in c.lower()), None)
+    lowfat_col = next((c for c in df.columns if 'lowfat' in c.lower() and 'rss' not in c.lower() and 'text' not in c.lower()), None)
+
+    if not all([baseline_col, n00b_col, n00balloc_col]):
+        print(f"FATAL: Could not auto-detect necessary RT columns (baseline, N00B, N00Balloc) in {csv_filename}")
+        print(f"Found columns: {df.columns.tolist()}")
+        return
+
+    rename_dict = {
+        baseline_col: 'baseline',
+        n00b_col: 'N00B',
+        n00balloc_col: 'N00Balloc'
+    }
+    if lowfat_col:
+        rename_dict[lowfat_col] = 'LowFat'
+        
+    df = df.rename(columns=rename_dict)
+    
     # Store which values have stars before converting
     stars = {}
     cols_check = ['baseline', 'N00B', 'N00Balloc']
@@ -17,7 +38,7 @@ def plot_results_from_csv(csv_filename):
         cols_check.append('LowFat')
         
     for col in cols_check:
-        stars[col] = df[col].astype(str).str.contains('\*')
+        stars[col] = df[col].astype(str).str.contains(r'\*')
         # Remove stars and convert comma decimals before converting to float
         df[col] = pd.to_numeric(df[col].astype(str).str.replace('*', '').str.replace(',', '.'), errors='coerce')
 
@@ -187,7 +208,7 @@ def plot_results_from_csv(csv_filename):
     labels = df.iloc[:, 0].tolist()
     for i, label in enumerate(labels):
         if 'geomean' in str(label):
-            labels[i] = r'$\mathbf{' + label.replace(' ', '\ ') + '}$'
+            labels[i] = r'$\mathbf{' + label.replace(' ', r'\ ') + '}$'
 
     # plt.xlabel(df.columns[0], fontsize=11)  # Smaller x-axis label
     plt.ylabel('Run-Time Ratio', fontsize=11)  # Smaller y-axis label

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import fnmatch
 from pathlib import Path
 from spec_report_utils import parse_rss, parse_oob_stats, parse_text_size, select_run, check_csv_conflict, update_csv, print_table
 
@@ -8,44 +9,33 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = Path.cwd()
 
 SPEC_ROOT = Path.cwd()
-BENCHSPEC_DIR = SPEC_ROOT / "benchspec/CPU2006"
+BENCHSPEC_DIR = SPEC_ROOT / "benchspec/CPU"
 
-# Order of benchmarks (CINT2006 first, then CFP2006)
-BENCH_ORDER = [
-    "400.perlbench",
-    "401.bzip2",
-    "403.gcc",
-    "429.mcf",
-    "445.gobmk",
-    "456.hmmer",
-    "458.sjeng",
-    "462.libquantum",
-    "464.h264ref",
-    "471.omnetpp",
-    "473.astar",
-    "483.xalancbmk",
-    "433.milc",
-    "444.namd",
-    "447.dealII",
-    "450.soplex",
-    "453.povray",
-    "470.lbm",
-    "482.sphinx3",
+# Benchmarks of interest (SPEC2017 speed, excluding Fortran)
+BENCHMARKS = [
+    "600.perlbench_s",
+    "602.gcc_s",
+    "605.mcf_s",
+    "620.omnetpp_s",
+    "623.xalancbmk_s",
+    "625.x264_s",
+    "631.deepsjeng_s",
+    "641.leela_s",
+    "657.xz_s",
+    "619.lbm_s",
+    "638.imagick_s",
+    "644.nab_s",
 ]
 
-SPECIAL_SHORTHANDS = {
-    "483.xalancbmk": "Xalan",
-    "482.sphinx3": "sphinx",
-}
-
-def newest_executable_among_runs(run_dirs, bench_short, config_name):
+def newest_executable_among_runs(run_dirs, bench_short):
+    short_no_s = bench_short[:-2] if bench_short.endswith("_s") else bench_short
     newest_exe = None
     newest_time = -1.0
     newest_dir = None
     for run_dir in run_dirs:
         try:
             for f in run_dir.iterdir():
-                if f.is_file() and os.access(f, os.X_OK) and f.name != "speccmds.cmd" and bench_short in f.name and f.name.endswith(config_name):
+                if f.is_file() and os.access(f, os.X_OK) and f.name != "speccmds.cmd" and short_no_s in f.name:
                     mtime = f.stat().st_mtime
                     if mtime > newest_time:
                         newest_exe = f
@@ -77,7 +67,7 @@ def get_historical_runs(config_name):
                 parts = line.strip().split()
                 if not parts: continue
                 bench = parts[0]
-                if bench in BENCH_ORDER and len(parts) >= 3:
+                if bench in BENCHMARKS and len(parts) >= 3:
                     if 'RE' in parts or 'X' in parts or 'CE' in parts:
                         if bench not in times:
                             times[bench] = ""
@@ -107,7 +97,7 @@ def collect_data(config_name, oob_stats=False):
     rss_count = 0
     text_count = 0
     
-    for bench in BENCH_ORDER:
+    for bench in BENCHMARKS:
         bench_dir = BENCHSPEC_DIR / bench
         disk_metrics[bench] = {"rss": "", "text": "", "oob": None, "rundir": ""}
         
@@ -116,16 +106,17 @@ def collect_data(config_name, oob_stats=False):
         if not run_root.is_dir(): continue
 
         run_subdirs = [d for d in run_root.iterdir() if d.is_dir() and d.name.startswith("run_")]
-        matches = [d for d in run_subdirs if config_name in d.name]
+        matches = [d for d in run_subdirs if fnmatch.fnmatch(d.name, f"*{config_name}*")]
         
-        bench_short = SPECIAL_SHORTHANDS.get(bench, bench.split(".", 1)[1])
-        exe_path, chosen_run = newest_executable_among_runs(matches, bench_short, config_name)
+        bench_short = bench.split(".", 1)[1]
+        exe_path, chosen_run = newest_executable_among_runs(matches, bench_short)
         
         if chosen_run:
             rundir_name = chosen_run.name
             oob = None
             rss = ""
             text_size = ""
+            
             if oob_stats:
                 oob = parse_oob_stats(chosen_run)
             else:
@@ -146,7 +137,7 @@ def collect_data(config_name, oob_stats=False):
     run_times = chosen_run.get("times", {}) if chosen_run else {}
 
     results = {}
-    for bench in BENCH_ORDER:
+    for bench in BENCHMARKS:
         is_in_run = bench in run_times
         if not is_in_run:
             results[bench] = {"rt": "", "rss": "", "text": "", "oob": None, "rundir": ""}
@@ -162,7 +153,7 @@ def collect_data(config_name, oob_stats=False):
     return results
 
 def main():
-    ap = argparse.ArgumentParser(description="SPEC CPU2006 runtime, RSS and .text reporter")
+    ap = argparse.ArgumentParser(description="SPEC CPU2017 runtime, RSS and .text reporter")
     ap.add_argument(
         "config_name",
         help="The name of the configuration (e.g. clang15-lto-CHANGE). "
@@ -184,7 +175,7 @@ def main():
 
     results = collect_data(args.config_name, oob_stats=args.oob_stats)
     
-    print_table(results, args.config_name, BENCH_ORDER, oob_stats=args.oob_stats)
+    print_table(results, args.config_name, BENCHMARKS, oob_stats=args.oob_stats)
 
     if args.csv is not None:
         csv_name = args.csv if args.csv else "spec-results.csv"
@@ -194,7 +185,7 @@ def main():
 
         col_names = [args.config_name, f"{args.config_name} peak RSS (MB)", f"{args.config_name} .text size (KB)"]
 
-        if check_csv_conflict(csv_file, col_names, BENCH_ORDER, lambda k: [results[k]["rt"], results[k]["rss"], results[k]["text"]]):
+        if check_csv_conflict(csv_file, col_names, BENCHMARKS, lambda k: [results[k]["rt"], results[k]["rss"], results[k]["text"]]):
             ans = input(f"WARNING: {csv_name} already has data for '{args.config_name}' that would be overwritten. Proceed? [y/N]: ")
             if ans.lower() != 'y':
                 print(f"Skipping update for {csv_name}.")
@@ -202,10 +193,11 @@ def main():
 
         update_csv(
             file_path=csv_file,
-            header_prefix=["SPEC CPU 2006"],
-            row_keys=BENCH_ORDER,
+            header_prefix=["SPEC CPU 2006"], 
+            row_keys=BENCHMARKS,
             new_col_names=col_names,
-            data_getter=lambda k: [results[k]["rt"], results[k]["rss"], results[k]["text"]]
+            data_getter=lambda k: [results[k]["rt"], results[k]["rss"], results[k]["text"]],
+            spec_group="2017"
         )
 
         print(f"Successfully updated CSV file!")
