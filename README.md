@@ -1,6 +1,7 @@
 # The N00B Bounds Checker
 
-This repo contains the compiler passes & runtime code necessary to harden applications with the N00B bounds checker. Clone it to get started:
+This repo contains the compiler passes & runtime code necessary to harden applications with the N00B bounds checker. 
+Clone everything to get started:
 ```bash
 git clone --recurse-submodules <url>
 
@@ -13,13 +14,21 @@ git submodule update
 N00B started as a research project published at [ACM CCS'26](https://www.sigsac.org/ccs/CCS2026/). Please use the following BibTex entry to cite it:
 ```bibtex
 @inproceedings{jacobs2026n00b,
-author = {Jacobs, Adriaan and Ramponi, Carlo and Roels, Jonas and Crispo, Bruno and Vlasceanu, Silviu and Ammar, Mahmoud and Volckaert, Stijn},
-title = {{N00B}: Bounds Checking for the Masses},
-year = {2026},
-booktitle = {Proceedings of the 33rd ACM Conference on Computer and Communications Security (CCS'26)},
-note = {To appear.}
+  author = {Jacobs, Adriaan and Ramponi, Carlo and Roels, Jonas and Crispo, Bruno and Vlasceanu, Silviu and Ammar, Mahmoud and Volckaert, Stijn},
+  title = {{N00B}: Bounds Checking for the Masses},
+  year = {2026},
+  booktitle = {Proceedings of the 33rd ACM Conference on Computer and Communications Security (CCS'26)},
+  note = {To appear.}
 }
 ```
+
+## Code Structure
+N00B's implementation consists of three main parts:
+1. [`llvm-plugin/`](/llvm-plugin/): an LTO plugin for the LLVM compiler that inserts bounds checks into C/C++ programs during compilation
+2. [`allocator/`](/allocator/): a custom dynamic memory allocator that arranges stack and heap objects such that they satisfy N00B's memory layout.
+3. [`n00bloader/`](/n00bloader/): a small program loader (chainloader) that reserved the N00B-managed memory region up front, so that non-N00B pointers can efficiently be ignored by the bounds checks
+
+Most of N00B's compiler optimizations are implemented in the reusable [CoROLLA](https://github.com/adriaanjacobs/CoROLLA) library, submoduled at `llvm-plugin/corolla`. 
 
 ## Building
 N00B is made up of out-of-tree compiler passes for LLVM 15. For Ubuntu 20.04 and 22.04 you can grab pre-built LLVM libraries from [LLVM's apt repositories](https://apt.llvm.org/). General instructions like so:
