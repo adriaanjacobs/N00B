@@ -223,7 +223,7 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
     LoopHoister loopHoister{module, MAM};
     loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, !EMIT_RUNTIME_CALLS && !EMULATE_LOWFAT && !COUNT_NOOB_FAILURES
 #if not INTRAPROCEDURAL_ONLY
-        , &pointerInfo
+        , pointerInfo
 #endif
     );
     // lowfat and runtime debug cannot handle non-postdom
@@ -247,8 +247,8 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
 
 #if SOUND_POINTER_DETECTION
     auto& isInBoundsAnalysis = MAM.getResult<IsInBoundsAnalysis>(module);
-    for (auto& pointer : pointerInfo.pointers) {
-        ASSERT_ELSE_UNKOWN(pointerInfo.is_confirmed_pointer(pointer), pointer);
+    for (auto& pointer : pointerInfo->pointers) {
+        ASSERT_ELSE_UNKOWN(pointerInfo->is_confirmed_pointer(pointer), pointer);
 #else
 #if not INTRAPROCEDURAL_ONLY
     auto& isInBoundsAnalysis = MAM.getResult<IsInBoundsAnalysis>(module);    
@@ -268,7 +268,7 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
         llvm::DenseSet<llvm::Use*> escapeSites;
         collectIntraProceduralPtrEscapes(pointer, escapeSites
 #if not INTRAPROCEDURAL_ONLY
-            , &pointerInfo
+            , pointerInfo
 #endif
         );
         for (auto* use : escapeSites) {
@@ -311,7 +311,7 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
     //  the advantage is that this will eliminate dominated arithmetic checks and such
     loopHoister.hoistLoopBoundMemAccesses(funcToCheckPoints, false
 #if not INTRAPROCEDURAL_ONLY
-        , &pointerInfo
+        , pointerInfo
 #endif
     ); // non-wrapping escape instrumentation is always branching
 
@@ -338,7 +338,7 @@ llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::
 #if INTRAPROCEDURAL_ONLY
             return PointerDetector::find_simple_base_pointer(ptr);
 #else
-            return pointerInfo.find_real_base(ptr);
+            return pointerInfo->find_real_base(ptr);
 #endif
         }
     };
@@ -457,11 +457,13 @@ llvm::Value* NOOBInstrumentationPass::computePoisonMaskAtDerefSite(const CheckIn
     }
 }
 
+#if COUNT_NOOB_FAILURES
 static void incrementGlobal(llvm::GlobalVariable* global, llvm::Instruction* insertBefore) {
     llvm::Instruction* count = new llvm::LoadInst(global->getValueType(), global, "", insertBefore);
     count = llvm::BinaryOperator::CreateAdd(count, llvm::ConstantInt::get(global->getValueType(), llvm::APInt{64, 1}), "", insertBefore);
     new llvm::StoreInst(count, global, insertBefore);
 }
+#endif
 
 // actually modify the program to insert the checks and update the usesToReplace
 void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::ModuleAnalysisManager& MAM, const llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>>& checkInfoToUses) {
