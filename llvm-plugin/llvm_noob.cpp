@@ -3,11 +3,11 @@
 #include <NOOB/config.h>
 #include <NOOB/memlayout.h>
 
-#include <llvm-utils/util.h>
-#include <llvm-utils/safetyanalysis/safetyanalysis.h>
-#include <llvm-utils/pointerdetection/pointerdetection.h>
-#include <llvm-utils/addressability/addressability.h>
-#include <llvm-utils/instrpointoptimization/hoistloopmemaccesses.h>
+#include <corolla/util.h>
+#include <corolla/safetyanalysis/safetyanalysis.h>
+#include <corolla/pointerdetection/pointerdetection.h>
+#include <corolla/addressability/addressability.h>
+#include <corolla/instrpointoptimization/hoistloopmemaccesses.h>
 
 #include <debugir/DebugIR.h>
 

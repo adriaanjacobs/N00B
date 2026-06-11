@@ -1,6 +1,6 @@
 #pragma once
 
-#include <llvm-utils/instrpointoptimization/hoistloopmemaccesses.h>
+#include <corolla/instrpointoptimization/hoistloopmemaccesses.h>
 
 #include <llvm/IR/PassManager.h>
 

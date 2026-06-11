@@ -20,7 +20,7 @@ configure_file(
 set(DEBUGIR_LLVM_VERSION 15)
 add_subdirectory(debugir/)
 
-add_subdirectory(llvm-utils/)
+add_subdirectory(corolla/)
 
 # The below part can be moved into its own subdirectory if you want (I typically do it like that)
 add_library(llvmnoob SHARED 
@@ -39,7 +39,7 @@ target_include_directories(llvmnoob PUBLIC
     ${LLVM_INCLUDE_DIRS}
     ${CMAKE_BINARY_DIR}/linker_script/
 )
-target_link_libraries(llvmnoob llvmutils dbgir)
+target_link_libraries(llvmnoob corolla dbgir)
 
 # an executable that sets up LLVM's pass machinery and runs our pass on a provided bitcode file
 add_executable(run_llvm_noob run_llvm_noob.cpp)

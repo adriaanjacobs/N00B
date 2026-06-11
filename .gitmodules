@@ -1,5 +1,5 @@
 [submodule "llvm-plugin/llvm-utils"]
-	path = llvm-plugin/llvm-utils
+	path = llvm-plugin/corolla
 	url = ../llvm-utils
 [submodule "llvm-plugin/debugir"]
 	path = llvm-plugin/debugir
