@@ -26,7 +26,7 @@ N00B started as a [research project](https://adriaanjacobs.github.io/files/ccs26
 N00B's implementation consists of three main parts:
 1. [`llvm-plugin/`](/llvm-plugin/): an LTO plugin for the LLVM compiler that inserts bounds checks into C/C++ programs during compilation
 2. [`allocator/`](/allocator/): a custom dynamic memory allocator that arranges stack and heap objects such that they satisfy N00B's memory layout.
-3. [`n00bloader/`](/n00bloader/): a small program loader (chainloader) that reserved the N00B-managed memory region up front, so that non-N00B pointers can efficiently be ignored by the bounds checks
+3. [`n00bloader/`](/n00bloader/): a small program loader (chainloader) that reserves the N00B-managed memory region up front, so that non-N00B pointers can efficiently be ignored by the bounds checks
 
 Most of N00B's compiler optimizations are implemented in the reusable [CoROLLA](https://github.com/adriaanjacobs/CoROLLA) library, submoduled at `llvm-plugin/corolla`. 
 
