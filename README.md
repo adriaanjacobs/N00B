@@ -11,7 +11,7 @@ git submodule update
 ```
 
 ## Citation
-N00B started as a research project published at [ACM CCS'26](https://www.sigsac.org/ccs/CCS2026/). Please use the following BibTex entry to cite it:
+N00B started as a [research project](https://adriaanjacobs.github.io/files/ccs26n00b.pdf) published at [ACM CCS'26](https://www.sigsac.org/ccs/CCS2026/). Please use the following BibTex entry to cite it:
 ```bibtex
 @inproceedings{jacobs2026n00b,
   author = {Jacobs, Adriaan and Ramponi, Carlo and Roels, Jonas and Crispo, Bruno and Vlasceanu, Silviu and Ammar, Mahmoud and Volckaert, Stijn},
@@ -60,7 +60,7 @@ For implementation reasons, N00B currently only supports whole-program IR during
 ### (Recommended) Single-step process: integrate with build system (`noobclang`)
 Use Link Time Optimization and integrate N00B with the build settings of the project. 
 
-We generate (best effort!) drop-in clang(++) replacer scripts called `noobclang(++)`, which apply the right flags during compilation and linking. 
+We provide drop-in clang(++) replacer scripts called `noobclang(++)`, which apply the right flags during compilation and linking. 
 You can simply specify `noobclang` as the project's compiler at configuration or build time. This will work for most projects, most of the time. 
 ```bash
 CC=${NOOB_DIR}/build/noobclang 
@@ -96,3 +96,11 @@ We generate SPEC CPU2006 (`${NOOB_DIR}/<build>/templates/spec06/`) and SPEC CPU2
 * `clang15-lto-baseline.cfg` runs without any N00B changes, but with the same compiler and optimization options.
 * `clang15-lto-nooballoc.cfg` measures the impact of N00B's memory layout requirements, with `nooballoc` linked into the binaries, and `n00bloader` to place them above `NOOB_MAX_ADDR`.  
 * `clang15-lto-noob.cfg` runs with full N00B hardening enabled. 
+
+All of these are generated based on your specific build environment, and can be dropped in to SPEC's config folder without any modification. 
+
+As reported in the paper, we applied some patches to GCC in both editions of SPEC. You can find those under [patches/](/patches/).
+
+## Smoke Test
+We provide a simple [test/test.c](/test/test.c) file, which you may compile down using `noobclang` and use to test out N00B's functionality. Please note that you'll need a CPU supporting pointer masking (Intel LAM/ARM TBI) to do this. 
+
