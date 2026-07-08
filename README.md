@@ -24,11 +24,37 @@ N00B started as a [research project](https://adriaanjacobs.github.io/files/ccs26
 
 ## Code Structure
 N00B's implementation consists of three main parts:
-1. [`llvm-plugin/`](/llvm-plugin/): an LTO plugin for the LLVM compiler that inserts bounds checks into C/C++ programs during compilation
-2. [`allocator/`](/allocator/): a custom dynamic memory allocator that arranges stack and heap objects such that they satisfy N00B's memory layout.
-3. [`n00bloader/`](/n00bloader/): a small program loader (chainloader) that reserves the N00B-managed memory region up front, so that non-N00B pointers can efficiently be ignored by the bounds checks
+1. [**`llvm-plugin/`**](/llvm-plugin/): an LTO plugin for the LLVM compiler that inserts bounds checks into C/C++ programs during compilation
+2. [**`allocator/`**](/allocator/): a custom dynamic memory allocator that arranges stack and heap objects such that they satisfy N00B's memory layout.
+3. [**`n00bloader/`**](/n00bloader/): a small program loader (chainloader) that reserves the N00B-managed memory region up front, so that non-N00B pointers can efficiently be ignored by the bounds checks
 
-Most of N00B's compiler optimizations are implemented in the reusable [CoROLLA](https://github.com/adriaanjacobs/CoROLLA) library, submoduled at `llvm-plugin/corolla`. 
+Most of N00B's compiler optimizations are implemented in the reusable [CoROLLA](https://github.com/adriaanjacobs/CoROLLA) library, submoduled at **`llvm-plugin/corolla`**. 
+
+## Requirements
+N00B relies on hardware **pointer masking** to make tagged pointers natively dereferenceable, and kernel support to manage and expose that hardware functionality to user-space processes. 
+Below is the current status of that support, as of July 2026: 
+
+| Arch | Extension | Hardware | Kernel |
+| --- | --- | --- | --- |
+| `aarch64` | Arm **TBI** (Top-Byte Ignore) | Any 64-bit Arm CPU | Tagged-address ABI (`PR_SET_TAGGED_ADDR_CTRL`), Linux ≥ 5.4 |
+| `x86_64` (AMD) | AMD **UAI** (Upper Address Ignore) | Zen 4 or newer | [**Not yet in mainline**](https://www.phoronix.com/news/AMD-Linux-UAI-Zen-4-Tagging) |
+| `x86_64` (Intel) | Intel **LAM** (Linear Address Masking), `U48` variant | Core Ultra 200 (Arrow Lake / Lunar Lake) or newer | **Not yet in mainline**, out-of-tree LAM U48 patches required ([details](/docs/intel-lam.md)) |
+
+> [!NOTE]
+> In principle, N00B could run on LAM U57 as well, which is already supported in the mainline kernel (but see [docs/intel-lam.md](docs/intel-lam.md)). 
+> We have not yet tested this configuration ourselves, but we would be happy to help make it work: if you are interested in a U57 port, please get in touch!
+
+`noobconfig.cmake` auto-detects the host at configuration time and picks the matching tag layout; there is nothing to set by hand on a supported platform. 
+
+### Compat mode (unsupported hardware)
+If your platform lacks a pointer masking extension, you can still build and run N00B in a non-secure **compat mode** to obtain performance numbers. In compat mode, bounds checks are compiled to no-ops and no pointers are tagged, so both in-bounds and out-of-bounds accesses complete without trapping.
+
+To enable it, set the following two variables at the bottom of [`noobconfig.cmake`](/noobconfig.cmake) before configuring:
+```cmake
+set(NOOB_IGNORE_ERRORS      ON)     # decode all N00B radices to a no-op value
+set(NOOB_TAG_POINTERS       OFF)    # skip enabling LAM/TBI at run time
+```
+With these set, N00B can build and run programs (insecurely) on any x86_64/AArch64 host, regardless of LAM/TBI support.
 
 ## Building
 N00B is made up of out-of-tree compiler passes for LLVM 15. For Ubuntu 20.04 and 22.04 you can grab pre-built LLVM libraries from [LLVM's apt repositories](https://apt.llvm.org/). General instructions like so:
@@ -55,7 +81,8 @@ If you manually installed LLVM to a non-standard location, you can set the `LLVM
 ## Hardening code with N00B
 For implementation reasons, N00B currently only supports whole-program IR during Link Time Optimization. There are two main ways to achieve this. 
 
-> _**NOTE**_: We are working to eliminate this unnecessary LTO requirement, and already provide alternatives for most most whole-program analyses in N00B. Reach out if you are interested in this! 
+> [!NOTE]
+> We are working to eliminate this unnecessary LTO requirement, and already provide alternatives for most whole-program analyses in N00B. Reach out if you are interested in this! 
 
 ### (Recommended) Single-step process: integrate with build system (`noobclang`)
 Use Link Time Optimization and integrate N00B with the build settings of the project. 
@@ -67,7 +94,8 @@ CC=${NOOB_DIR}/build/noobclang
 CXX=${NOOB_DIR}/build/noobclang++
 ```
 
-> _**NOTE**_: The script simply looks for a `-c` command line option to figure out whether it's being called at compile or link time. This is a very stupid heuristic, but works so far on all projects we have tested. If you encounter weird problems, it is likely due to this. Let us know!
+> [!NOTE]
+> The script simply looks for a `-c` command line option to figure out whether it's being called at compile or link time. This is a very stupid heuristic, but works so far on all projects we have tested. If you encounter weird problems, it is likely due to this. Let us know!
 
 If you want to test just the impact of N00B's allocator, we also provide similar `nooballocclang(++)` scripts. These do not instrument the program, but only link in the runtime support. 
 
@@ -102,5 +130,6 @@ All of these are generated based on your specific build environment, and can be 
 As reported in the paper, we applied some patches to GCC in both editions of SPEC. You can find those under [patches/](/patches/).
 
 ## Smoke Test
-We provide a simple [test/test.c](/test/test.c) file, which you may compile down using `noobclang` and use to test out N00B's functionality. Please note that you'll need a CPU supporting pointer masking (Intel LAM/ARM TBI) to do this. 
+We provide a simple [test/test.c](/test/test.c) file, which you may compile down using `noobclang` and use to test out N00B's functionality. 
+Please note that you'll need a platform supporting pointer masking to do this (see [Requirements](#requirements)). 
 
