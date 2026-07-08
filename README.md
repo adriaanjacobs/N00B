@@ -47,7 +47,7 @@ Below is the current status of that support, as of July 2026:
 `noobconfig.cmake` auto-detects the host at configuration time and picks the matching tag layout; there is nothing to set by hand on a supported platform. 
 
 ### Compat mode (unsupported hardware)
-If your platform lacks a pointer masking extension, you can still build and run N00B in a non-secure **compat mode** to obtain performance numbers. In compat mode, bounds checks are compiled to no-ops and no pointers are tagged, so both in-bounds and out-of-bounds accesses complete without trapping.
+If your platform lacks a pointer masking extension, you can still build and run N00B in a non-secure **compat mode** to obtain performance numbers. In compat mode, bounds checks always pass and pointers are not tagged.
 
 To enable it, set the following two variables at the bottom of [`noobconfig.cmake`](/noobconfig.cmake) before configuring:
 ```cmake
