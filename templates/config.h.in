@@ -1,5 +1,8 @@
 #pragma once
 
+// the address-ignore feature the tag layout below was configured for, see noobconfig.cmake
+#define NOOB_TAG_SCHEME             "@NOOB_TAG_SCHEME@"
+
 #define TAG_WIDTH                   (${TAG_WIDTH})
 #define NOOB_TOPTAG_START           (${NOOB_TOPTAG_START})
 static_assert(NOOB_TOPTAG_START + TAG_WIDTH <= 64);

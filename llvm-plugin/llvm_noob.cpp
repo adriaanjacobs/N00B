@@ -21,6 +21,7 @@
 #include <llvm/Transforms/IPO/AlwaysInliner.h>
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
 #include <llvm/Transforms/Utils/InstructionNamer.h>
+#include <llvm/ADT/Triple.h>
 
 #include <sstream>
 
@@ -854,7 +855,24 @@ void NOOBInstrumentationPass::maskExternalPointerArguments(llvm::Module& module)
                                 }
 }
 
+// verify that the target arch of the module matches the one NOOB_TAG_SCHEME implies
+//  helps catch otherwise annoying mismatch bugs
+static void verifyTargetMatchesConfig(llvm::Module& module) {
+    llvm::StringRef scheme = NOOB_TAG_SCHEME;
+    assert((scheme == "TBI" || scheme == "LAM" || scheme == "UAI") && "unknown tagging scheme");
+    auto expected = scheme == "TBI" ? llvm::Triple::aarch64 : llvm::Triple::x86_64;
+
+    llvm::Triple triple{module.getTargetTriple()};
+    if (triple.getArch() != expected) {
+        llvm::report_fatal_error(llvm::Twine{"NOOB was configured for "} + scheme + ", which targets " +
+            llvm::Triple::getArchTypeName(expected) + ", but this module targets '" +
+            triple.getArchName() + "'. ");
+    }
+}
+
 llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm::ModuleAnalysisManager& MAM) {
+    verifyTargetMatchesConfig(module);
+
 #if REMAP_GLOBALS
     // find unsafe globals up front, before modification
     const auto radixToGlobals = findUnsafeGlobals(module, MAM);

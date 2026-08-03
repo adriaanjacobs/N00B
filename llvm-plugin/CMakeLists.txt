@@ -3,13 +3,12 @@ message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
 # generate the noob linker script for the appropriate architecture
-#   check the target arch
-if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
-    set(LINKER_SCRIPT lld.x86-64.ld)
-elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+if(NOOB_TAG_SCHEME STREQUAL "TBI")
     set(LINKER_SCRIPT lld.AArch64.ld)
+elseif(NOOB_TAG_SCHEME MATCHES "^(LAM|UAI)$")
+    set(LINKER_SCRIPT lld.x86-64.ld)
 else()
-    message(FATAL_ERROR "Unsupported architecture: ${CMAKE_SYSTEM_PROCESSOR}")
+    message(FATAL_ERROR "Unsupported NOOB_TAG_SCHEME: ${NOOB_TAG_SCHEME}")
 endif()
 #   generate the linker script. It will automatically fill in the relevant variables
 configure_file(

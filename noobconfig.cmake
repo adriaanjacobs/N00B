@@ -1,8 +1,37 @@
 # N00B config file. Defaults are set for reproducible performance evaluation, across both x86 and ARM
 
+# What the tag layout below actually depends on is the hardware feature that lets us hide a tag in
+#   the upper pointer bits, not the CPU as such:
+#       TBI -- AArch64  Top Byte Ignore
+#       LAM -- Intel    Linear Address Masking
+#       UAI -- AMD      Upper Address Ignore
+#   Left empty we pick the one this machine supports, which is what you want for a native build.
+#   Anything else -- hardening an arm64 kernel from an x86_64 workstation, say -- has to say so:
+#       cmake ... -DNOOB_TAG_SCHEME=TBI
+#   Getting this wrong is silent at build time, so the pass re-checks it against the module triple.
+set(NOOB_TAG_SCHEME "" CACHE STRING
+    "Pointer masking extension to target: TBI, LAM or UAI. Empty detects from the build host.")
+set_property(CACHE NOOB_TAG_SCHEME PROPERTY STRINGS "" TBI LAM UAI)
+if(NOOB_TAG_SCHEME STREQUAL "")
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+        set(NOOB_TAG_SCHEME "TBI")
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$")
+        file(READ "/proc/cpuinfo" CPUINFO_RAW)
+        if(CPUINFO_RAW MATCHES "vendor_id\t: GenuineIntel")
+            set(NOOB_TAG_SCHEME "LAM")
+        elseif(CPUINFO_RAW MATCHES "vendor_id\t: AuthenticAMD")
+            set(NOOB_TAG_SCHEME "UAI")
+        else()
+            message(FATAL_ERROR "Host is x86_64 but vendor_id is neither Intel nor AMD?")
+        endif()
+    else()
+        message(FATAL_ERROR "No tagging scheme known for host '${CMAKE_SYSTEM_PROCESSOR}'")
+    endif()
+endif()
+
 # encode platform differences here
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
-    message(STATUS "Host: AArch64 (ARM)")
+if(NOOB_TAG_SCHEME STREQUAL "TBI")
+    message(STATUS "N00B target: AArch64 TBI")
     set(TAG_WIDTH               8)
     set(NOOB_TOPTAG_START       56) # amount to shift down by to obtain the toptag. N00B assumes that all bits above the toptag are 0
     # no minimum allocation size
@@ -13,32 +42,24 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
     #   ensures that it is transparently ignored by our instrumentation, without explicit masking
     #   48 is the magical value where all instrumentation is transparently ignored
     set(NON_NOOB_MIN_RADIX      48)
-    set(NOOB_IGNORE_ERRORS      OFF)
-    set(NOOB_TAG_POINTERS       ON)
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)")
-    # figure out if this is Intel or AMD
-    file(READ "/proc/cpuinfo" CPUINFO_RAW)
-    if(CPUINFO_RAW MATCHES "vendor_id\t: GenuineIntel")
-        message(STATUS "Host: Intel x86_64 (Detected GenuineIntel)")
-        set(TAG_WIDTH               8)
-        set(NOOB_TOPTAG_START       55)
-        # minimum 16B allocations
-        set(NOOB_MIN_RADIX          0x4)
-        # maximum 16GB allocations
-        set(NON_NOOB_MIN_RADIX      35)
-    elseif(CPUINFO_RAW MATCHES "vendor_id\t: AuthenticAMD")
-        message(STATUS "Host: AMD x86_64 (Detected AuthenticAMD)")
-        set(TAG_WIDTH               7)
-        set(NOOB_TOPTAG_START       56)
-        # minimum 16B allocations
-        set(NOOB_MIN_RADIX          0x4)
-        # maximum 16GB allocations
-        set(NON_NOOB_MIN_RADIX      35)
-    else()
-        message(FATAL_ERROR "Host: x86_64, but Vendor ID is unknown: ${HOST_PROC}")
-    endif()
+elseif(NOOB_TAG_SCHEME STREQUAL "LAM")
+    message(STATUS "N00B target: Intel LAM (x86_64)")
+    set(TAG_WIDTH               8)
+    set(NOOB_TOPTAG_START       55)
+    # minimum 16B allocations
+    set(NOOB_MIN_RADIX          0x4)
+    # maximum 16GB allocations
+    set(NON_NOOB_MIN_RADIX      35)
+elseif(NOOB_TAG_SCHEME STREQUAL "UAI")
+    message(STATUS "N00B target: AMD UAI (x86_64)")
+    set(TAG_WIDTH               7)
+    set(NOOB_TOPTAG_START       56)
+    # minimum 16B allocations
+    set(NOOB_MIN_RADIX          0x4)
+    # maximum 16GB allocations
+    set(NON_NOOB_MIN_RADIX      35)
 else()
-    message(FATAL_ERROR "Unsupported processor: ${CMAKE_SYSTEM_PROCESSOR}")
+    message(FATAL_ERROR "Unknown NOOB_TAG_SCHEME '${NOOB_TAG_SCHEME}', expected TBI, LAM or UAI")
 endif()
 
 set(NOOB_IGNORE_ERRORS      OFF)
