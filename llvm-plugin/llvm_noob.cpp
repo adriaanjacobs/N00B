@@ -481,9 +481,11 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
     auto boolTy = llvm::Type::getInt1Ty(context);
     auto noob_access_check_fn = module.getOrInsertFunction("noob_access_check", llvm::Type::getVoidTy(context), int8PtrTy, int8PtrTy, boolTy, boolTy);
     // create the function containing the branching instrumentation
+    assert(!module.getFunction("noob_assert_zero") && "noob_assert_zero must not already exist. double-instrumented IR?");
     auto noob_assert_zero_fn = module.getOrInsertFunction("noob_assert_zero", llvm::Type::getVoidTy(context), int64Ty);
     {
         auto func = llvm::cast<llvm::Function>(noob_assert_zero_fn.getCallee());
+        func->setLinkage(llvm::GlobalValue::InternalLinkage); // so that alwaysinliner deletes the definition afterwards, in case we link with another N00B-hardened module
         func->addFnAttr(llvm::Attribute::AlwaysInline);
         auto entry = llvm::BasicBlock::Create(context, "", func);
         auto ret = llvm::ReturnInst::Create(context, entry);
