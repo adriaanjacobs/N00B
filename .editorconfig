@@ -1,0 +1,17 @@
+root = true
+
+[*]
+charset = utf-8
+indent_size = 4
+indent_style = space
+max_line_length = 80
+insert_final_newline = true
+
+[*.md]
+max_line_length = 100
+
+[CMakeLists.txt]
+max_line_length = 100
+
+[*.{c,cpp,h,hpp,h.in}]
+max_line_length = 100
