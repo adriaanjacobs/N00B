@@ -57,6 +57,10 @@ set(NOOB_TAG_POINTERS       OFF)    # skip enabling LAM/TBI at run time
 With these set, N00B can build and run programs (insecurely) on any x86_64/AArch64 host, regardless of LAM/TBI support.
 
 ## Building
+N00B needs to be built with Clang 15. You can either do this directly on Ubuntu releases that have
+packages for this version, or by using the provided Docker environment.
+
+### Native on Ubuntu
 N00B is made up of out-of-tree compiler passes for LLVM 15. For Ubuntu 20.04 and 22.04 you can grab pre-built LLVM libraries from [LLVM's apt repositories](https://apt.llvm.org/). General instructions like so:
 ```bash
 wget https://apt.llvm.org/llvm.sh
@@ -77,6 +81,16 @@ cmake ../ -DLLVM_DIR=/usr/lib/llvm-15/lib/cmake/ -DClang_DIR=/usr/lib/llvm-15/li
 make -j
 ```
 If you manually installed LLVM to a non-standard location, you can set the `LLVM_DIR` CMake variable to the `cmake/llvm` folder of your installation (containing `LLVMConfig.cmake`, `find <folder> -name "LLVMConfig.cmake"`). Same for `Clang_DIR`. 
+
+### Using Docker
+On other operating systems, N00B can also be built using the provided Docker environment. You can
+enter this with the following commands:
+```bash
+docker build --tag n00b_build .
+docker run --user $(id -u):$(id -g) --rm -it --volume .:$PWD --workdir $PWD n00b_build bash
+```
+
+Afterwards you can use the same build instructions as above.
 
 ## Hardening code with N00B
 For implementation reasons, N00B currently only supports whole-program IR during Link Time Optimization. There are two main ways to achieve this. 
