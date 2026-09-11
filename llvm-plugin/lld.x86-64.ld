@@ -286,14 +286,14 @@ unmanaged_start = ${NOOB_MAX_ADDR};
 /*
 SECTIONS {
   . = 1<<43;
-  .noob_globals_radix4 : { *(.noob_globals_radix4) } : noob_globals_radix4
+  .noob_globals_power4 : { *(.noob_globals_power4) } : noob_globals_power4
   . = 2<<44;
-  .noob_globals_radix5 : { *(.noob_globals_radix5) } : noob_globals_radix5
+  .noob_globals_power5 : { *(.noob_globals_power5) } : noob_globals_power5
 }
 
 PHDRS {
-  noob_globals_radix4 PT_LOAD FLAGS(0x6);
-  noob_globals_radix5 PT_LOAD FLAGS(0x6);
+  noob_globals_power4 PT_LOAD FLAGS(0x6);
+  noob_globals_power5 PT_LOAD FLAGS(0x6);
 }
 */
 

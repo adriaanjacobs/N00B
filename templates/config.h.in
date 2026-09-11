@@ -3,19 +3,30 @@
 // the address-ignore feature the tag layout below was configured for, see noobconfig.cmake
 #define NOOB_TAG_SCHEME             "@NOOB_TAG_SCHEME@"
 
+/**
+ * The number of bits in the toptag.
+ */
 #define TAG_WIDTH                   (${TAG_WIDTH})
 #define NOOB_TOPTAG_START           (${NOOB_TOPTAG_START})
 static_assert(NOOB_TOPTAG_START + TAG_WIDTH <= 64);
-#define NOOB_MIN_RADIX              (${NOOB_MIN_RADIX})
-#define NON_NOOB_MIN_RADIX          (${NON_NOOB_MIN_RADIX})
+
+/**
+ * The smallest size for N00B-managed objects.
+ * For example if this is 4, the smallest objects can be 16 bytes.
+ * Smaller objects are automatically increased to this size.
+ */
+#define NOOB_MIN_POWER              (${NOOB_MIN_POWER})
+
+/**
+ * Power of objects that N00B no longer manages.
+ * The space N00B would normally use for these objects can be safely used for data that shouldn't be
+ * managed by N00B.
+ */
+#define NON_NOOB_MIN_POWER          (${NON_NOOB_MIN_POWER})
 #cmakedefine01 NOOB_IGNORE_ERRORS
 #cmakedefine01 NOOB_TAG_POINTERS
 #define NOOB_MAX_ADDR               (${NOOB_MAX_ADDR})
 
-#define ARITH_LEEWAY_WIDTH          (${ARITH_LEEWAY_WIDTH})
-static_assert(ARITH_LEEWAY_WIDTH == 0, "we don't need to permit additional arithmetic");
-#define ARITH_LEEWAY_OCCUPIED_BITS  (${ARITH_LEEWAY_OCCUPIED_BITS})
-static_assert(ARITH_LEEWAY_OCCUPIED_BITS < (1U << ARITH_LEEWAY_WIDTH));
 #define NOOB_STACK_SIZE             (${NOOB_STACK_SIZE})
 
 #cmakedefine01 CHECK_DEREFERENCE_SITES
@@ -33,7 +44,33 @@ static_assert(ARITH_LEEWAY_OCCUPIED_BITS < (1U << ARITH_LEEWAY_WIDTH));
 #cmakedefine01 REMAP_GLOBALS
 
 #cmakedefine01 EMIT_RUNTIME_CALLS
-#cmakedefine01 TRACK_ARITH_STATS
 
 #cmakedefine01 EMULATE_LOWFAT
-#cmakedefine01 PAD_BY_ONE_BYTE
+
+/**
+ * Extra padding that should be added to each allocation using the N00B allocator. Useful for
+ * testing.
+ */
+#define NOOBALLOC_PADDING_BYTES     ${NOOBALLOC_PADDING_BYTES}
+
+/**
+ * Log allocation metrics when threads finish or the allocator is unloaded. Enabling this only turns
+ * on metric collection. Logging needs to be on to actually show them.
+ */
+#define NOOBALLOC_METRICS           ${NOOBALLOC_METRICS}
+
+/**
+ * Cache line size of the system, in bytes.
+ */
+#define CACHE_LINE_SIZE             ${CACHE_LINE_SIZE}
+
+/**
+ * Whether logging should be included. Logging may still need to be enabled at runtime to actually
+ * show any messages.
+ */
+#define DO_LOGGING                  ${DO_LOGGING}
+
+/**
+ * Whether tracing of function calls should be included.
+ */
+#define DO_TRACING                  ${DO_TRACING}

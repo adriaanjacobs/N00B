@@ -51,7 +51,7 @@ If your platform lacks a pointer masking extension, you can still build and run 
 
 To enable it, set the following two variables at the bottom of [`noobconfig.cmake`](/noobconfig.cmake) before configuring:
 ```cmake
-set(NOOB_IGNORE_ERRORS      ON)     # decode all N00B radices to a no-op value
+set(NOOB_IGNORE_ERRORS      ON)     # decode all N00B powers to a no-op value
 set(NOOB_TAG_POINTERS       OFF)    # skip enabling LAM/TBI at run time
 ```
 With these set, N00B can build and run programs (insecurely) on any x86_64/AArch64 host, regardless of LAM/TBI support.

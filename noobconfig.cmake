@@ -36,28 +36,28 @@ if(NOOB_TAG_SCHEME STREQUAL "TBI")
     set(NOOB_TOPTAG_START       56) # amount to shift down by to obtain the toptag. N00B assumes that all bits above the toptag are 0
     # no minimum allocation size
     #   the implementation may enforce additional minima for performance/simplicity
-    #   but this setting guarantees that the actual radix will be encoded natively in the pointer
-    set(NOOB_MIN_RADIX          0x0)
+    #   but this setting guarantees that the actual power will be encoded natively in the pointer
+    set(NOOB_MIN_POWER          0x0)
     # allocator may enforce lower limits (e.g. 34), but mapping non-noob above this
     #   ensures that it is transparently ignored by our instrumentation, without explicit masking
     #   48 is the magical value where all instrumentation is transparently ignored
-    set(NON_NOOB_MIN_RADIX      48)
+    set(NON_NOOB_MIN_POWER      48)
 elseif(NOOB_TAG_SCHEME STREQUAL "LAM")
     message(STATUS "N00B target: Intel LAM (x86_64)")
     set(TAG_WIDTH               8)
     set(NOOB_TOPTAG_START       55)
     # minimum 16B allocations
-    set(NOOB_MIN_RADIX          0x4)
+    set(NOOB_MIN_POWER          0x4)
     # maximum 16GB allocations
-    set(NON_NOOB_MIN_RADIX      35)
+    set(NON_NOOB_MIN_POWER      35)
 elseif(NOOB_TAG_SCHEME STREQUAL "UAI")
     message(STATUS "N00B target: AMD UAI (x86_64)")
     set(TAG_WIDTH               7)
     set(NOOB_TOPTAG_START       56)
     # minimum 16B allocations
-    set(NOOB_MIN_RADIX          0x4)
+    set(NOOB_MIN_POWER          0x4)
     # maximum 16GB allocations
-    set(NON_NOOB_MIN_RADIX      35)
+    set(NON_NOOB_MIN_POWER      35)
 else()
     message(FATAL_ERROR "Unknown NOOB_TAG_SCHEME '${NOOB_TAG_SCHEME}', expected TBI, LAM or UAI")
 endif()
@@ -65,10 +65,8 @@ endif()
 set(NOOB_IGNORE_ERRORS      OFF)
 set(NOOB_TAG_POINTERS       ON)
 
-math(EXPR NOOB_MAX_ADDR "(${NON_NOOB_MIN_RADIX}-${NOOB_MIN_RADIX})<<42" OUTPUT_FORMAT HEXADECIMAL)
+math(EXPR NOOB_MAX_ADDR "(${NON_NOOB_MIN_POWER}-${NOOB_MIN_POWER})<<42" OUTPUT_FORMAT HEXADECIMAL)
 
-set(ARITH_LEEWAY_WIDTH          0)
-set(ARITH_LEEWAY_OCCUPIED_BITS  0b00)
 set(NOOB_STACK_SIZE             0x400000ULL) # bzip2 needs large objects on the stack!
 
 set(CHECK_DEREFERENCE_SITES     ON)
@@ -86,13 +84,29 @@ if (NOT CHECK_POINTER_ARITHMETIC)
     set(COUNT_NOOB_FAILURES     OFF)     # Masked ptr counting only implemented for deref-only
 endif()
 
+# Whether stack allocations should be moved to individual N00B stacks and
+# checked.
 set(REPLACE_STACK_ALLOCS        OFF)
 set(REMAP_GLOBALS               OFF)
 
 set(EMIT_RUNTIME_CALLS          OFF)
-if (EMIT_RUNTIME_CALLS)
-    set(TRACK_ARITH_STATS       OFF)    # EMIT_RUNTIME_CALLS must be enabled to use TRACK_ARITH_STATS
-endif()
 
 set(EMULATE_LOWFAT              OFF)
-set(PAD_BY_ONE_BYTE             OFF)
+
+# Extra padding that should be added to each allocation using the N00B
+# allocator. Useful for testing.
+set(NOOBALLOC_PADDING_BYTES     0)
+
+# Show allocation metrics when a thread finishes or the allocator is unloaded.
+# This only collects the metrics. Enable logging to actually show them. Handy
+# for testing the impact of collecting metrics without any logging.
+set(NOOBALLOC_METRICS           0)
+
+# Cache line size of the system in bytes.
+set(CACHE_LINE_SIZE             64)
+
+# Whether useful log messages should be enabled.
+set(DO_LOGGING                  0)
+
+# Whether tracing of function calls should be enabled.
+set(DO_TRACING                  0)
