@@ -62,8 +62,8 @@ else()
     message(FATAL_ERROR "Unknown NOOB_TAG_SCHEME '${NOOB_TAG_SCHEME}', expected TBI, LAM or UAI")
 endif()
 
-set(NOOB_IGNORE_ERRORS      OFF)
-set(NOOB_TAG_POINTERS       ON)
+set(NOOB_IGNORE_ERRORS      ON)
+set(NOOB_TAG_POINTERS       OFF)
 
 math(EXPR NOOB_MAX_ADDR "(${NON_NOOB_MIN_POWER}-${NOOB_MIN_POWER})<<42" OUTPUT_FORMAT HEXADECIMAL)
 
@@ -74,7 +74,7 @@ set(CHECK_ESCAPE_SITES          ON)
 set(CHECK_POINTER_ARITHMETIC    ON)
 set(CHECK_POINTER_DEREFERENCES  ON)
 set(USE_BRANCHING_CHECKS        ON)
-set(INTRAPROCEDURAL_ONLY        OFF)
+set(INTRAPROCEDURAL_ONLY        ON)
 if (NOT INTRAPROCEDURAL_ONLY)
     set(SOUND_POINTER_DETECTION ON)     # Interprocedural analyses must be enabled to use sound pointer detection
 endif()
@@ -100,13 +100,10 @@ set(NOOBALLOC_PADDING_BYTES     0)
 # Show allocation metrics when a thread finishes or the allocator is unloaded.
 # This only collects the metrics. Enable logging to actually show them. Handy
 # for testing the impact of collecting metrics without any logging.
-set(NOOBALLOC_METRICS           0)
-
-# Cache line size of the system in bytes.
-set(CACHE_LINE_SIZE             64)
+set(NOOBALLOC_METRICS           1)
 
 # Whether useful log messages should be enabled.
-set(DO_LOGGING                  0)
+set(DO_LOGGING                  1)
 
 # Whether tracing of function calls should be enabled.
 set(DO_TRACING                  0)

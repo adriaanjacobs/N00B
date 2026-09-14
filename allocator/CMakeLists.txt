@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.5) # this can probably be relaxed tbh
 
 project(noob-allocator)
 
+execute_process(COMMAND getconf LEVEL1_DCACHE_LINESIZE
+    OUTPUT_VARIABLE CACHE_LINE_SIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
+
 add_library(nooballoc SHARED
     arena.cpp
     init.cpp
@@ -13,6 +16,7 @@ add_library(nooballoc SHARED
     thread_allocator.cpp
     thread_size_allocator.cpp
 )
+target_compile_definitions(nooballoc PRIVATE CACHE_LINE_SIZE=${CACHE_LINE_SIZE})
 set_property(TARGET nooballoc PROPERTY CXX_VISIBILITY_PRESET hidden)
 target_compile_options(nooballoc PUBLIC 
     -Wall -Wextra -Werror=return-type -Wimplicit-fallthrough -Wno-unused-parameter -Wno-unused-variable

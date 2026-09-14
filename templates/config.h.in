@@ -60,11 +60,6 @@ static_assert(NOOB_TOPTAG_START + TAG_WIDTH <= 64);
 #define NOOBALLOC_METRICS           ${NOOBALLOC_METRICS}
 
 /**
- * Cache line size of the system, in bytes.
- */
-#define CACHE_LINE_SIZE             ${CACHE_LINE_SIZE}
-
-/**
  * Whether logging should be included. Logging may still need to be enabled at runtime to actually
  * show any messages.
  */
