@@ -35,7 +35,7 @@ struct CheckInfo : public InstrumentationPoint {
 /// This class implements an LLVM module transformation pass.
 class NOOBInstrumentationPass : public llvm::PassInfoMixin<NOOBInstrumentationPass> {
     std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> findUnsafeGlobals(llvm::Module&, llvm::ModuleAnalysisManager& MAM);
-    void extendNOOBLinkerScript(std::string& noobLinkerScript, const std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>>& radixToGlobals);
+    void extendNOOBLinkerScript(std::string& noobLinkerScript, const std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>>& powerToGlobals);
 
     llvm::DenseSet<llvm::Instruction*> findUnsafeAccesses(llvm::Module& module, llvm::ModuleAnalysisManager& MAM);
 
@@ -48,14 +48,14 @@ class NOOBInstrumentationPass : public llvm::PassInfoMixin<NOOBInstrumentationPa
     void maskExternalPointerArguments(llvm::Module& module);
 
     struct ComputedBasePtrInfo {
-        llvm::Value* radix;
+        llvm::Value* power;
         llvm::Value* origObj;
         llvm::Value* topTag;
     };
     llvm::Value* computeSafeInArithAreaPtr(llvm::Value* ptr, llvm::Value* arithAreaSize, llvm::Value* arithAreaBase, llvm::Value* trackedBase, llvm::Instruction* insertBefore);
-    llvm::Value* shiftDownTillInPointerTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore);
-    llvm::Value* embedInPointerTagAsTopTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore);
-    llvm::Value* computeTopTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore);
+    llvm::Value* shiftDownTillInPointerTag(llvm::Value* ptr, llvm::Value* power, llvm::Instruction* insertBefore);
+    llvm::Value* embedInPointerTagAsTopTag(llvm::Value* ptr, llvm::Value* power, llvm::Instruction* insertBefore);
+    llvm::Value* computeTopTag(llvm::Value* ptr, llvm::Value* power, llvm::Instruction* insertBefore);
     llvm::Value* computePoisonMaskAtDerefSite(const CheckInfo& checkInfo, const ComputedBasePtrInfo& basePtrInfo, llvm::Instruction* insertBefore);
 
 public:
@@ -70,10 +70,10 @@ public:
     static void addPasses(llvm::ModulePassManager&);
 };
 
-struct RadixDecoder {
+struct PowerDecoder {
     llvm::Module& module;
-    llvm::GlobalVariable* radixTable = nullptr;
+    llvm::GlobalVariable* powerTable = nullptr;
 
-    RadixDecoder(llvm::Module& module);
-    llvm::Value* computeRadix(llvm::Value* ptrAsInt, llvm::Instruction* insertBefore);
+    PowerDecoder(llvm::Module& module);
+    llvm::Value* computePower(llvm::Value* ptrAsInt, llvm::Instruction* insertBefore);
 };

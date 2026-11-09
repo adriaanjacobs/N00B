@@ -1,39 +1,5 @@
-*
-!.gitignore
-!CMakeLists.txt
-!*.cpp
-!*.h
-!*.md
-!noobclang
-!noobclang++
-!*.cmake
-!*.in
-!*.patch
-!*.sh
-!*.py
+# Recommended build directory
+/build/
 
-!allocator/
-!allocator/**/
-
-!docs/
-
-!include/
-!include/**/
-
-!llvm-plugin/
-!llvm-plugin/**/
-
-!n00bloader
-
-!patches/
-!patches/**/
-
-!results/
-
-!scripts/
-
-!templates/
-!templates/**/
-
-!test/
-!test/**/
+# Clang cache files
+/.cache/

@@ -25,7 +25,7 @@
 
 #include <sstream>
 
-// find all the globals we want to wrap, compute their radix, and set the minimum alignment
+// find all the globals we want to wrap, compute their power, and set the minimum alignment
 // std::map so we get it nice and ordered
 std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> NOOBInstrumentationPass::findUnsafeGlobals(llvm::Module& module, llvm::ModuleAnalysisManager& MAM) {
 #if INTRAPROCEDURAL_ONLY
@@ -35,7 +35,7 @@ std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> NOOBInstrumentation
 #endif
 
     auto& callSiteAnalysis = MAM.getResult<CallSiteAnalysis>(module);
-    std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> radixToGlobals;
+    std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> powerToGlobals;
     size_t numSafeGlobals = 0;
     for (auto& global : module.globals()) {
         // globals that cannot flow into unsafeaccesses should be left alone
@@ -52,53 +52,53 @@ std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>> NOOBInstrumentation
         ASSERT_ELSE_UNKOWN(!global.hasCommonLinkage(), &global);
         unsigned long alignTo = module.getDataLayout().getTypeAllocSize(global.getValueType()).getFixedSize();
         // enforce a minimum alignment for globals that have no alignment, a too small alignment, a too small size, or a combination
-        constexpr size_t noob_min_size = std::max(1UL << NOOB_MIN_RADIX, 8UL); // minimum 8 regardless
+        constexpr size_t noob_min_size = std::max(1UL << NOOB_MIN_POWER, 8UL); // minimum 8 regardless
         alignTo = std::max(alignTo, global.getAlign().hasValue() ? global.getAlign()->value() : noob_min_size);
         if (alignTo < noob_min_size)
             alignTo = noob_min_size;
-        auto radix = std::bit_width(alignTo - 1);
+        auto power = std::bit_width(alignTo - 1);
         // fucking sjeng has a 2MB global for fucks sake
         // that's a 1GB arena :(((((
-        ASSERT_ELSE_UNKOWN(radix < 25, &global); // idk why we'd need globals larger than this
-        global.setAlignment(llvm::Align{(1ULL << radix)});
-        radixToGlobals[radix].push_back(&global);
+        ASSERT_ELSE_UNKOWN(power < 25, &global); // idk why we'd need globals larger than this
+        global.setAlignment(llvm::Align{(1ULL << power)});
+        powerToGlobals[power].push_back(&global);
     }
 
     // print it out the global stats
     llvm::outs() << "We proved " << numSafeGlobals << "/" << module.global_size() << " globals safe. The rest: \n";
-    for (auto& [radix, globals] : radixToGlobals) {
-        llvm::outs() << "\tRadix " << radix << ": " << globals.size() << " globals (size: " << (1ULL << radix) * globals.size() << "B)\n";
+    for (auto& [power, globals] : powerToGlobals) {
+        llvm::outs() << "\tPower " << power << ": " << globals.size() << " globals (size: " << (1ULL << power) * globals.size() << "B)\n";
     }
 
-    return radixToGlobals;
+    return powerToGlobals;
 }
 
 // extend the linker script to allocate the appropriate number of sections
 // The plan is to generate a custom linker script, save it to `noob_linker_script.ld`, and then have the user specify that filename
 //  on the command line as the -T parameter during linking. 
-void NOOBInstrumentationPass::extendNOOBLinkerScript(std::string& noobLinkerScript, const std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>>& radixToGlobals) {
+void NOOBInstrumentationPass::extendNOOBLinkerScript(std::string& noobLinkerScript, const std::map<uint64_t, llvm::SmallVector<llvm::GlobalVariable*>>& powerToGlobals) {
     llvm::SmallVector<std::string> segmentNames;
     std::stringstream sections;
     sections << "\nSECTIONS {\n";
-    for (auto& [radix, globals] : radixToGlobals) {
-        assert(radix < 25); // idk why we'd need globals larger than this
-        assert(std::popcount(single_arena_size(radix)) == 1);
-        auto needed_size =  (1ULL << radix) * globals.size();
-        auto num_occupied_arenas = __builtin_align_up(needed_size, single_arena_size(radix)) / single_arena_size(radix);
+    for (auto& [power, globals] : powerToGlobals) {
+        assert(power < 25); // idk why we'd need globals larger than this
+        assert(std::popcount(single_arena_size(power)) == 1);
+        auto needed_size =  (1ULL << power) * globals.size();
+        auto num_occupied_arenas = __builtin_align_up(needed_size, single_arena_size(power)) / single_arena_size(power);
         // always start and end with a reserved region
         auto needed_arenas = 1 + num_occupied_arenas * 2;
         // layout is: reserved | repeat [occupied | reserved]
-        auto base_address = size_region_base(radix);
+        auto base_address = size_region_base(power);
         for (uint i = 0; i < needed_arenas; i++) {
             std::string suffix = "RESERVED";
             bool isReserved = i % 2 == 0; // odd index means occupied
             if (!isReserved) 
                 suffix = "OCCUPIED";
-            base_address += single_arena_size(radix);
+            base_address += single_arena_size(power);
             if (!isReserved)
-                assert(base_address % arith_area_size(radix) == 0); // optimized arithchecks expect this
+                assert(base_address % arith_area_size(power) == 0); // optimized arithchecks expect this
             assert(base_address % 0x1000UL == 0); // should be page-aligned. otherwise just align it up I guess
-            auto segmentName = llvm::formatv("noob_globals_radix{0}_{1}_{2}", radix, i, suffix).str();
+            auto segmentName = llvm::formatv("noob_globals_power{0}_{1}_{2}", power, i, suffix).str();
             segmentNames.push_back(segmentName);
             sections << llvm::formatv("  . = SEGMENT_START(\"{0}\", {1:x});\n", segmentName, base_address).str();
             sections << llvm::formatv("  .{0} : { KEEP(*(.{0})) } : {0}\n", segmentName).str();
@@ -111,7 +111,7 @@ void NOOBInstrumentationPass::extendNOOBLinkerScript(std::string& noobLinkerScri
             auto memory_idx = 1 + arena_idx*2; // always odd
 
             auto global = globals[i];
-            global->setSection(llvm::formatv(".noob_globals_radix{0}_{1}_{2}", radix, memory_idx, "OCCUPIED").str());
+            global->setSection(llvm::formatv(".noob_globals_power{0}_{1}_{2}", power, memory_idx, "OCCUPIED").str());
         }
     }
     sections << "}\n";
@@ -170,7 +170,7 @@ bool belongsToUnsafeModule(llvm::Function* function) {
 //  there are 2 types of NOOB bounds checks: 
 //      1. dereference checks: verify that the tag in the top pointer bits matches the tag embedded in the pointer address
 //      2. arithmetic checks: verify that pointer arithmetic does not modify any of the more significant bits, 
-//          so that in-pointer tags cannot repeat, radix info/top tag is not corrupted, etc.
+//          so that in-pointer tags cannot repeat, power info/top tag is not corrupted, etc.
 llvm::DenseMap<CheckInfo*, llvm::DenseSet<llvm::Use*>> NOOBInstrumentationPass::createInstrumentationPlans(llvm::Module& module, llvm::ModuleAnalysisManager& MAM) {
 #if INTRAPROCEDURAL_ONLY
     auto unsafeAccesses = findUnsafeAccesses(module, MAM);
@@ -381,23 +381,23 @@ llvm::Value* NOOBInstrumentationPass::computeSafeInArithAreaPtr(llvm::Value* ptr
     return provenancedSafePtr;
 }
 
-llvm::Value* NOOBInstrumentationPass::shiftDownTillInPointerTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore) {
+llvm::Value* NOOBInstrumentationPass::shiftDownTillInPointerTag(llvm::Value* ptr, llvm::Value* power, llvm::Instruction* insertBefore) {
     auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
     auto ptrAsInt = createBitOrPointerCastIfNecessary(ptr, int64Ty, "", insertBefore);
-    auto ipTag = llvm::BinaryOperator::CreateLShr(ptrAsInt, radix, "iptag", insertBefore);
+    auto ipTag = llvm::BinaryOperator::CreateLShr(ptrAsInt, power, "iptag", insertBefore);
     return llvm::BinaryOperator::CreateAnd(ipTag, llvm::Constant::getIntegerValue(int64Ty, llvm::APInt{64, (1UL << TAG_WIDTH) - 1}), "iptag", insertBefore);
 }
 
-llvm::Value* NOOBInstrumentationPass::embedInPointerTagAsTopTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore) {
+llvm::Value* NOOBInstrumentationPass::embedInPointerTagAsTopTag(llvm::Value* ptr, llvm::Value* power, llvm::Instruction* insertBefore) {
     auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
     auto ptrAsInt = castToInt64Ty(ptr, insertBefore);
-    auto inPointerTag = shiftDownTillInPointerTag(ptrAsInt, radix, insertBefore);
+    auto inPointerTag = shiftDownTillInPointerTag(ptrAsInt, power, insertBefore);
     auto inPointerTagMask = llvm::BinaryOperator::CreateShl(inPointerTag, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, NOOB_TOPTAG_START}), "", insertBefore);
     // assuming that offsetStackPtr's top tag is 0 here (which it should be)
     return llvm::BinaryOperator::CreateOr(ptrAsInt, inPointerTagMask, "", insertBefore);
 }
 
-llvm::Value* NOOBInstrumentationPass::computeTopTag(llvm::Value* ptr, llvm::Value* radix, llvm::Instruction* insertBefore) {
+llvm::Value* NOOBInstrumentationPass::computeTopTag(llvm::Value* ptr, llvm::Value* power, llvm::Instruction* insertBefore) {
     auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
     auto ptrAsInt = createBitOrPointerCastIfNecessary(ptr, int64Ty, "", insertBefore);
     return llvm::BinaryOperator::CreateLShr(ptrAsInt, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, NOOB_TOPTAG_START}), "toptag", insertBefore);
@@ -407,20 +407,19 @@ llvm::Value* NOOBInstrumentationPass::computePoisonMaskAtDerefSite(const CheckIn
     auto int64Ty = llvm::Type::getInt64Ty(insertBefore->getContext());
     // FIXME: "mbedtls_md5_starts_ret" in benchmark.ll has an example at the top of an unnecessary arith check. why do we have it??
     assert(checkInfo.shouldCheckDereference()); // this function assumes we're at a deref site, for poisoning
-    const auto radix = basePtrInfo.radix;
+    const auto power = basePtrInfo.power;
     if (checkInfo.shouldCheckArith()) {
         assert(CHECK_POINTER_ARITHMETIC);
-        static_assert(ARITH_LEEWAY_WIDTH == 0, "I did not account for non-zero leeway bits here");
         // common case: we check both arith & deref
         //  implement optimized instrumentation here, that checks arith & deref at once
         auto origObj = basePtrInfo.origObj;
         auto ptrAsInt = castToInt64Ty(checkInfo.pointerOperand, insertBefore);
-        auto currentObj = llvm::BinaryOperator::CreateLShr(ptrAsInt, radix, "", insertBefore);
+        auto currentObj = llvm::BinaryOperator::CreateLShr(ptrAsInt, power, "", insertBefore);
         llvm::Instruction* isInBounds = new llvm::ICmpInst(insertBefore, llvm::ICmpInst::ICMP_EQ, currentObj, origObj, "");
         if (checkInfo.isRangeCheck()) {
             // also check whether the endOfAddressRange is in bounds, and OR the result with the previous isInBounds
             auto endOfRangeAsInt = castToInt64Ty(checkInfo.endOfAddressRange, insertBefore);
-            auto endOfRangeObj = llvm::BinaryOperator::CreateLShr(endOfRangeAsInt, radix, "", insertBefore);
+            auto endOfRangeObj = llvm::BinaryOperator::CreateLShr(endOfRangeAsInt, power, "", insertBefore);
             auto endOfRangeInBounds = new llvm::ICmpInst(insertBefore, llvm::ICmpInst::ICMP_EQ, endOfRangeObj, origObj, "");
             // isInBounds = isInBounds && endOfRangeInBounds
             isInBounds = llvm::SelectInst::Create(isInBounds, endOfRangeInBounds, isInBounds, "", insertBefore);
@@ -431,11 +430,11 @@ llvm::Value* NOOBInstrumentationPass::computePoisonMaskAtDerefSite(const CheckIn
         // rarer case: we only check deref, because arith got pruned
         //  implement an even more optimized version here that solely checks deref
         // find the in pointer tag and top tag
-        auto inPointerTag = shiftDownTillInPointerTag(checkInfo.pointerOperand, radix, insertBefore);
+        auto inPointerTag = shiftDownTillInPointerTag(checkInfo.pointerOperand, power, insertBefore);
         // xor the iptag with the toptag
         auto isNotInBounds = llvm::BinaryOperator::CreateXor(inPointerTag, basePtrInfo.topTag, "notinbounds", insertBefore);
         if (checkInfo.isRangeCheck()) {
-            auto endOfAddrIpTag = shiftDownTillInPointerTag(checkInfo.endOfAddressRange, radix, insertBefore);
+            auto endOfAddrIpTag = shiftDownTillInPointerTag(checkInfo.endOfAddressRange, power, insertBefore);
             auto endOfAddrNotInBounds = llvm::BinaryOperator::CreateXor(endOfAddrIpTag, basePtrInfo.topTag, "notinbounds", insertBefore);
             // isNotInBounds = isNotInBounds || endOfAddrNotInBounds
             isNotInBounds = llvm::BinaryOperator::CreateOr(isNotInBounds, endOfAddrNotInBounds, "notinbounds", insertBefore);
@@ -449,7 +448,7 @@ llvm::Value* NOOBInstrumentationPass::computePoisonMaskAtDerefSite(const CheckIn
         auto poisonMask = llvm::BinaryOperator::CreateAnd(isNotInBounds, llvm::ConstantInt::getIntegerValue(int64Ty, {64, (1U << TAG_WIDTH) - 1}), "", insertBefore);
 #else
         //                          64      56/57   48    42                   0 
-        // place the resulting value |top bits|_here_|radix|rest of pointer ...|
+        // place the resulting value |top bits|_here_|power|rest of pointer ...|
         //  it's not a problem that the more significant bits of the `poisonMask` value likely aren't 0 here, they will get ignored by TBI/UAI anyway
         //  this would only be a problem for range checks, where the pointer value could escape, but we zero out the top bits of isNotInBounds for that reason
         auto poisonMask = llvm::BinaryOperator::CreateShl(isNotInBounds, llvm::ConstantInt::getIntegerValue(int64Ty, llvm::APInt{64, NOOB_TOPTAG_START - TAG_WIDTH}), "", insertBefore);
@@ -508,8 +507,8 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
     }
 
     // embed the lookup table if necessary
-    RadixDecoder radixDecoder{module};
-    // precompute the baseobj & radix for all trackedbases. Will be unused if not needed, otherwise good speedup
+    PowerDecoder powerDecoder{module};
+    // precompute the baseobj & power for all trackedbases. Will be unused if not needed, otherwise good speedup
     llvm::DenseMap<llvm::Value*, llvm::DenseMap<llvm::Function*, llvm::DenseSet<CheckInfo*>>> trackedBaseToCheckInfos;
     for (auto& [checkInfo, usesToReplace] : checkInfoToUses) 
         trackedBaseToCheckInfos[checkInfo->trackedBase][checkInfo->insertBefore->getFunction()].insert(checkInfo);
@@ -531,7 +530,7 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
                     if (checkInfo->insertBefore->comesBefore(insertBefore))
                         insertBefore = checkInfo->insertBefore;
 
-            // do a little bit of hoisting here: if the baseobj/radix precomputation unnecessarily happens in a loop, hoist it
+            // do a little bit of hoisting here: if the baseobj/power precomputation unnecessarily happens in a loop, hoist it
             auto trackedBaseDominates = [&,&trackedBase=trackedBase] (llvm::Instruction* loc) -> bool {
                 // 453.povray _actually_ has a *(null + 32-bit value). When that executes, we'll simply trigger a crash.
                 if (!llvm::isa<llvm::Instruction>(trackedBase))
@@ -551,23 +550,23 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
                 break;
             }
 
-            // precompute radix from base
+            // precompute power from base
             auto baseAsInt = createBitOrPointerCastIfNecessary(trackedBase, int64Ty, "", insertBefore);
-            auto radix = radixDecoder.computeRadix(baseAsInt, insertBefore);
+            auto power = powerDecoder.computePower(baseAsInt, insertBefore);
 
-            auto topTag = computeTopTag(baseAsInt, radix, insertBefore);
+            auto topTag = computeTopTag(baseAsInt, power, insertBefore);
 
 #if EMULATE_LOWFAT
             // precompute the objbase here for lowfat
-            auto origObj = llvm::BinaryOperator::CreateLShr(baseAsInt, radix, "lowfat.baseobj", insertBefore);
+            auto origObj = llvm::BinaryOperator::CreateLShr(baseAsInt, power, "lowfat.baseobj", insertBefore);
 #else
             // precompute "origObj" value with toptag in lower bits: most often needed value at arithderef sites
-            auto origObj = llvm::BinaryOperator::CreateLShr(baseAsInt, radix, "", insertBefore);
+            auto origObj = llvm::BinaryOperator::CreateLShr(baseAsInt, power, "", insertBefore);
             origObj = llvm::BinaryOperator::CreateAnd(origObj, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, ~((1ULL << TAG_WIDTH) - 1)}), "", insertBefore); // clear iptag bits
             origObj = llvm::BinaryOperator::CreateOr(origObj, topTag, "", insertBefore);
 #endif
             // deref-only sites use the toptag
-            baseToBasePtrInfo[trackedBase][func] = {radix, origObj, topTag};
+            baseToBasePtrInfo[trackedBase][func] = {power, origObj, topTag};
         }
     }
 
@@ -589,11 +588,11 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
         assert(!checkInfo->shouldCheckDereference()); // we explicitly disable these because we implement lowfat as arith checks
         if (checkInfo->shouldCheckArith()) {
             auto ptrAsInt = createBitOrPointerCastIfNecessary(checkInfo->pointerOperand, int64Ty, "", insertBefore);
-            auto ptrObj = llvm::BinaryOperator::CreateLShr(ptrAsInt, basePtrInfo.radix, "lowfat.ptrobj", insertBefore);
+            auto ptrObj = llvm::BinaryOperator::CreateLShr(ptrAsInt, basePtrInfo.power, "lowfat.ptrobj", insertBefore);
             llvm::Instruction* isInBounds = new llvm::ICmpInst(insertBefore, llvm::ICmpInst::ICMP_EQ, ptrObj, basePtrInfo.origObj, "inbounds");
             if (checkInfo->isRangeCheck()) {
                 auto endPtrAsInt = createBitOrPointerCastIfNecessary(checkInfo->endOfAddressRange, int64Ty, "", insertBefore);
-                auto endPtrObj = llvm::BinaryOperator::CreateLShr(endPtrAsInt, basePtrInfo.radix, "lowfat.endPtrObj", insertBefore);
+                auto endPtrObj = llvm::BinaryOperator::CreateLShr(endPtrAsInt, basePtrInfo.power, "lowfat.endPtrObj", insertBefore);
                 auto endPtrInBounds = new llvm::ICmpInst(insertBefore, llvm::ICmpInst::ICMP_EQ, endPtrObj, basePtrInfo.origObj, "inbounds");
                 isInBounds = llvm::SelectInst::Create(isInBounds, isInBounds, endPtrInBounds, "inbounds", insertBefore);
             }
@@ -675,14 +674,14 @@ void NOOBInstrumentationPass::applyNOOBChecks(llvm::Module& module, llvm::Module
             ASSERT_ELSE_UNKOWN(!checkInfo->isRangeCheck(), checkInfo->pointerOperand); // our typical range check poisoning approach wouldnt work here
             assert(!COUNT_NOOB_FAILURES);
 
-            auto radix = basePtrInfo.radix;
+            auto power = basePtrInfo.power;
 
             // compute the arena identifiers for both base & offset ptr
-            auto radixPlusTW = llvm::BinaryOperator::CreateAdd(radix, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, TAG_WIDTH}), "", insertBefore);
+            auto powerPlusTW = llvm::BinaryOperator::CreateAdd(power, llvm::ConstantInt::get(int64Ty, llvm::APInt{64, TAG_WIDTH}), "", insertBefore);
             auto baseAsInt = createBitOrPointerCastIfNecessary(checkInfo->trackedBase, int64Ty, "", insertBefore);
-            auto basearena = llvm::BinaryOperator::CreateLShr(baseAsInt, radixPlusTW, "", insertBefore);
+            auto basearena = llvm::BinaryOperator::CreateLShr(baseAsInt, powerPlusTW, "", insertBefore);
             auto ptrAsInt = createBitOrPointerCastIfNecessary(checkInfo->pointerOperand, int64Ty, "", insertBefore);
-            auto ptrarena = llvm::BinaryOperator::CreateLShr(ptrAsInt, radixPlusTW, "", insertBefore);
+            auto ptrarena = llvm::BinaryOperator::CreateLShr(ptrAsInt, powerPlusTW, "", insertBefore);
 
             // compare them
             auto poison = llvm::BinaryOperator::CreateXor(basearena, ptrarena, "", insertBefore);
@@ -721,9 +720,9 @@ llvm::DenseMap<llvm::Function*, llvm::DenseSet<llvm::AllocaInst*>> NOOBInstrumen
 }
 
 
-// move all unsafe stack objects to per-radix noobstacks
+// move all unsafe stack objects to per-power noobstacks
 void NOOBInstrumentationPass::moveUnsafeAllocasToNOOBStacks(llvm::Module& module, const llvm::DenseMap<llvm::Function*, llvm::DenseSet<llvm::AllocaInst*>>& unsafeAllocas) {
-    // create an array of per-radix noob-stackptrs
+    // create an array of per-power noob-stackptrs
     auto& context = module.getContext();
     auto noobStackPtrArrayType = llvm::ArrayType::get(llvm::Type::getInt8PtrTy(context), 64);
     auto noobStackPtrArray = new llvm::GlobalVariable(
@@ -736,10 +735,10 @@ void NOOBInstrumentationPass::moveUnsafeAllocasToNOOBStacks(llvm::Module& module
     );
     auto int64Ty = llvm::Type::getInt64Ty(context);
     
-    uint8_t lowestRadix = UINT8_MAX;
-    uint8_t highestRadix = 0;
+    uint8_t lowestPower = UINT8_MAX;
+    uint8_t highestPower = 0;
     for (auto& [func, allocas] : unsafeAllocas) {
-        llvm::DenseMap<llvm::TypeSize::ScalarTy, llvm::SmallVector<llvm::AllocaInst*>> radixToUnsafeAllocas;
+        llvm::DenseMap<llvm::TypeSize::ScalarTy, llvm::SmallVector<llvm::AllocaInst*>> powerToUnsafeAllocas;
         for (auto alloca : allocas) {
             auto sizeInBitsOpt = alloca->getAllocationSizeInBits(module.getDataLayout());
             ASSERT_ELSE_UNKOWN(sizeInBitsOpt.hasValue(), alloca); // will fail for VLAs
@@ -751,43 +750,43 @@ void NOOBInstrumentationPass::moveUnsafeAllocasToNOOBStacks(llvm::Module& module
                 llvm::errs() << "alignedSizeInBytes = " << alignedSizeInBytes << "\n";
             ASSERT_ELSE_UNKOWN(alignedSizeInBytes <= NOOB_STACK_SIZE, alloca);
 
-            auto radix = std::max(3UL, std::bit_width(alignedSizeInBytes) - 1UL);
-            radix = std::max(static_cast<unsigned long>(NOOB_MIN_RADIX), radix);
+            auto power = std::max(3UL, std::bit_width(alignedSizeInBytes) - 1UL);
+            power = std::max(static_cast<unsigned long>(NOOB_MIN_POWER), power);
 
-            // keep track of the max and min radix here
-            if (radix < lowestRadix)
-                lowestRadix = radix;
-            if (radix > highestRadix)
-                highestRadix = radix;
+            // keep track of the max and min power here
+            if (power < lowestPower)
+                lowestPower = power;
+            if (power > highestPower)
+                highestPower = power;
 
             ASSERT_ELSE_UNKOWN(alignedSizeInBytes >= alloca->getAlign().value(), alloca);
-            radixToUnsafeAllocas[radix].push_back(alloca);
+            powerToUnsafeAllocas[power].push_back(alloca);
         }
 
         auto insertAllocaPtrsBefore = &*func->getEntryBlock().getFirstInsertionPt();
         llvm::DenseMap<llvm::AllocaInst*, llvm::Value*> allocaToNewStackAlloc;
-        for (auto& [radix, allocas] : radixToUnsafeAllocas) {
-            // retrieve the "thread-local" stack pointer for this radix
-            auto addressOfRadixStackPtr = llvm::ConstantExpr::getInBoundsGetElementPtr(noobStackPtrArrayType, noobStackPtrArray, llvm::ArrayRef{llvm::ConstantInt::getNullValue(llvm::Type::getInt64Ty(context)), llvm::ConstantInt::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt{64, radix})});
-            auto radixStackPtr = new llvm::LoadInst(llvm::Type::getInt8PtrTy(context), addressOfRadixStackPtr, llvm::formatv("noob.stackptr.{0}", radix), insertAllocaPtrsBefore);
+        for (auto& [power, allocas] : powerToUnsafeAllocas) {
+            // retrieve the "thread-local" stack pointer for this power
+            auto addressOfPowerStackPtr = llvm::ConstantExpr::getInBoundsGetElementPtr(noobStackPtrArrayType, noobStackPtrArray, llvm::ArrayRef{llvm::ConstantInt::getNullValue(llvm::Type::getInt64Ty(context)), llvm::ConstantInt::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt{64, power})});
+            auto powerStackPtr = new llvm::LoadInst(llvm::Type::getInt8PtrTy(context), addressOfPowerStackPtr, llvm::formatv("noob.stackptr.{0}", power), insertAllocaPtrsBefore);
 
             // now allocate the necessary amount for this function and update the stackPtr slot in memory
             auto numObjects = allocas.size();
-            auto endOfRadixStackPtr = llvm::GetElementPtrInst::CreateInBounds(llvm::Type::getInt8Ty(context), radixStackPtr, {llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt{64, numObjects * (1ULL << radix)})}, "", insertAllocaPtrsBefore);
-            new llvm::StoreInst(endOfRadixStackPtr, addressOfRadixStackPtr, insertAllocaPtrsBefore);
+            auto endOfPowerStackPtr = llvm::GetElementPtrInst::CreateInBounds(llvm::Type::getInt8Ty(context), powerStackPtr, {llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt{64, numObjects * (1ULL << power)})}, "", insertAllocaPtrsBefore);
+            new llvm::StoreInst(endOfPowerStackPtr, addressOfPowerStackPtr, insertAllocaPtrsBefore);
 
             // now create the offset pointers that represent the individual allocas
             for (uint idx = 0; idx < allocas.size(); idx++) {
                 auto alloca = allocas[idx];
-                llvm::Value* offsetStackPtr = llvm::GetElementPtrInst::CreateInBounds(llvm::Type::getInt8Ty(context), radixStackPtr, {llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt{64, idx * (1ULL << radix)})}, "", alloca);
+                llvm::Value* offsetStackPtr = llvm::GetElementPtrInst::CreateInBounds(llvm::Type::getInt8Ty(context), powerStackPtr, {llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt{64, idx * (1ULL << power)})}, "", alloca);
                 // i needn't concern myself with marking these as "noalias" here -- we should only do this at the very end of the optimization pipeline
                 // any optimizations that benefit from the aliasing information should have been done by now
 
 #if NOOB_TAG_POINTERS
                 // now put the in-pointer tag in the top tag to make the pointer fully NOOB-compliant
                 offsetStackPtr = castToInt64Ty(offsetStackPtr, alloca);
-                auto radixVal = llvm::ConstantInt::get(int64Ty, {64, radix});
-                offsetStackPtr = embedInPointerTagAsTopTag(offsetStackPtr, radixVal, alloca);
+                auto powerVal = llvm::ConstantInt::get(int64Ty, {64, power});
+                offsetStackPtr = embedInPointerTagAsTopTag(offsetStackPtr, powerVal, alloca);
 #endif
 
                 auto castedPtr = llvm::CastInst::CreateBitOrPointerCast(offsetStackPtr, alloca->getType(), alloca->getName(), alloca);
@@ -799,13 +798,13 @@ void NOOBInstrumentationPass::moveUnsafeAllocasToNOOBStacks(llvm::Module& module
                 if (auto ret = llvm::dyn_cast<llvm::ReturnInst>(bb.getTerminator())) {
                     // for now, we're lazy and use the old stackPtr, as a kind of "frame pointer"
                     // we might potentially get better results by loading back from memory & recomputing here
-                    new llvm::StoreInst(radixStackPtr, addressOfRadixStackPtr, ret);
+                    new llvm::StoreInst(powerStackPtr, addressOfPowerStackPtr, ret);
                 }
             }
         }
 
         // now delete all these allocas. we couldn't do this before because `insertBefore` was likely one of them
-        for (auto& [_, allocas] : radixToUnsafeAllocas) {
+        for (auto& [_, allocas] : powerToUnsafeAllocas) {
             for (auto& alloca : allocas) {
                 alloca->eraseFromParent();
                 alloca = nullptr; // just to make sure we dont access this again
@@ -813,12 +812,12 @@ void NOOBInstrumentationPass::moveUnsafeAllocasToNOOBStacks(llvm::Module& module
         }
     }
 
-    if (highestRadix) { // don't do anything if we didnt find a single stack alloc (e.g. specrand)
-        llvm::outs() << "All stack object radices were between " << (int) lowestRadix << " and " << (int) highestRadix << ".\n";
+    if (highestPower) { // don't do anything if we didnt find a single stack alloc (e.g. specrand)
+        llvm::outs() << "All stack object powers were between " << (int) lowestPower << " and " << (int) highestPower << ".\n";
 
         // now insert a function to call NOOB's stack allocation function to initialize the stackptr array
         // it will be called from the noob initialization routine
-        // void noob_allocate_stacks(void** stack_array, uint8_t start_radix, uint8_t num_stacks);
+        // void noob_allocate_stacks(void** stack_array, uint8_t start_power, uint8_t num_stacks);
         auto ptrToVoidPtrTy = llvm::PointerType::getUnqual(llvm::Type::getInt8PtrTy(context));
         auto noob_allocate_stacks_fn = module.getOrInsertFunction("noob_allocate_stacks", llvm::Type::getVoidTy(context), ptrToVoidPtrTy, llvm::Type::getInt8Ty(context), llvm::Type::getInt8Ty(context));
         auto noob_initialize_noobstacks_fn = module.getOrInsertFunction("noob_initialize_noobstacks", llvm::Type::getVoidTy(context));
@@ -830,9 +829,9 @@ void NOOBInstrumentationPass::moveUnsafeAllocasToNOOBStacks(llvm::Module& module
             {
                     llvm::ConstantExpr::getBitCast(noobStackPtrArray, ptrToVoidPtrTy), 
                     llvm::Constant::getIntegerValue(llvm::Type::getInt8Ty(context), 
-                    llvm::APInt{8, lowestRadix}), 
+                    llvm::APInt{8, lowestPower}), 
                     llvm::Constant::getIntegerValue(llvm::Type::getInt8Ty(context), 
-                    llvm::APInt{8, highestRadix})
+                    llvm::APInt{8, highestPower})
                 }, 
             "", insertBefore
         );
@@ -877,7 +876,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
 
 #if REMAP_GLOBALS
     // find unsafe globals up front, before modification
-    const auto radixToGlobals = findUnsafeGlobals(module, MAM);
+    const auto powerToGlobals = findUnsafeGlobals(module, MAM);
 #endif
     // also find unsafe allocas up front
     const auto unsafeAllocas = findUnsafeAllocas(module, MAM);
@@ -899,7 +898,7 @@ llvm::PreservedAnalyses NOOBInstrumentationPass::run(llvm::Module& module, llvm:
         #include "noob_linker_script.ld"
     };
 #if REMAP_GLOBALS
-    extendNOOBLinkerScript(noobLinkerScript, radixToGlobals);
+    extendNOOBLinkerScript(noobLinkerScript, powerToGlobals);
 #endif
     std::error_code ec;
     llvm::raw_fd_ostream linkerScript{"noob_linker_script.ld", ec};

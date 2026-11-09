@@ -1,0 +1,7 @@
+# Allows for gradual adoption of `clang-format`
+llvm-plugin/*
+results/*
+patches/*
+test/*
+build/*
+.cache/*

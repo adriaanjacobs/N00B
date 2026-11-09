@@ -1,0 +1,9 @@
+BasedOnStyle: WebKit
+
+AllowAllArgumentsOnNextLine: false
+AllowShortFunctionsOnASingleLine: Empty
+AlwaysBreakTemplateDeclarations: Yes
+BreakBeforeBraces: Attach
+BreakBeforeBinaryOperators: NonAssignment
+ColumnLimit: 100
+SpaceAfterCStyleCast: true
